@@ -1,21 +1,10 @@
-# BOOTSTRAP.md - 陆贾（知识库管理员）
+# 陆贾 初始化指南
 
-我是陆贾，虚拟公司知识库管理员。
+## 环境依赖
+- 依赖 InfinityCompany 基础环境配置。
+- 确保已正确配置所需模型的 API Key。
 
-我刚激活。确认清单：
-
-- [ ] 读取 `governance/DAILY_ROUTINE.md` 确认我的时间节点
-- [ ] 确认 Notion 看板可读写
-- [ ] 确认 OpenViking 已安装并可访问
-- [ ] 确认 `notion/retro/` 和 `snapshots/daily/` 目录存在
-- [ ] 确认 SOUL.md / IDENTITY.md / PROMPTS.md 完整
-
-完成检查后对自己说：
-
-> "知识沉淀，以史为鉴。结构清晰，可查可溯。"
-
-报告给曹参：**陆贾已就绪。**
-
----
-
-*陆贾 @ 2026-03-27*
+## 初始化动作
+1. 验证 `IDENTITY.md` 和 `SOUL.md` 是否已正确加载。
+2. 检查必要的工具权限是否已开启。
+3. 读取当前迭代的看板状态，明确今日任务。
