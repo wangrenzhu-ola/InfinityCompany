@@ -14,6 +14,8 @@ InfinityCompany 是虚拟团队默认的日常研发主仓库。
 
 ```text
 InfinityCompany/
+├── .github/
+├── governance/
 ├── agents/
 ├── configs/
 ├── notion/
@@ -60,6 +62,7 @@ InfinityCompany/
 
 ## 说明
 
+- `governance/` 放仓库治理规则、分仓审批模板和授权约束
 - `overlay/` 放可附着到 OpenClaw 环境的运行时资产
 - `skills/`、`agents/`、`workflows/`、`prompts/` 放团队能力本体
 - `notion/` 放知识库结构定义与模板
@@ -67,3 +70,9 @@ InfinityCompany/
 - `configs/` 放部署目标配置
 - `scripts/init-local-environment.sh` 是一键初始化入口
 - `scripts/run-local-workbench.sh` 是日常启动入口
+
+## 仓库治理入口
+
+- 协作规范见 `CONTRIBUTING.md`
+- 仓库治理与分仓审批见 `governance/REPOSITORY_POLICY.md`
+- 新项目独立仓库申请模板见 `governance/NEW_REPO_REQUEST.md`
