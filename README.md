@@ -1,5 +1,7 @@
 # InfinityCompany
 
+私人 AI 公司主仓库。
+
 ## 目标
 
 InfinityCompany 是虚拟团队默认的日常研发主仓库。
