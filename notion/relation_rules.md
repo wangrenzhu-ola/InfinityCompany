@@ -1,80 +1,93 @@
-# Story/Task/Bug/复盘关联规则与流转约束
+# Notion 看板关联规则与流转约束
 
-> 本文档定义看板间的关联规则与流转约束，作为开发自动化脚本的参考规范。
+本文档定义 InfinityCompany 项目中 Story、Task、Bug 与复盘记录之间的关联规则与流转约束。
 
 ---
 
 ## 1. 关联关系定义
 
-### 1.1 实体关系概览
+### 1.1 实体关系图（Mermaid ER Diagram）
 
 ```mermaid
 erDiagram
-    STORY ||--o{ TASK : contains
-    TASK ||--o{ BUG : produces
-    TASK }o--|| ITERATION : belongs_to
-    BUG }o--|| REVIEW : traced_in
-    TASK }o--|| REVIEW : summarized_in
+    STORY ||--o{ TASK : "包含"
+    TASK ||--o{ BUG : "产生"
+    TASK }o--|| ITERATION : "归属"
+    BUG }o--|| ITERATION : "归属"
+    BUG }o--|| REVIEW : "追溯"
+    TASK }o--|| REVIEW : "汇总"
+    STORY }o--|| ITERATION : "规划"
+    REVIEW }o--|| ITERATION : "关联"
+
     STORY {
-        string id PK
-        string title
-        string status
-        string priority
-        date planned_start
-        date planned_end
+        string id PK "唯一标识"
+        string title "标题"
+        string status "状态"
+        string priority "优先级"
+        string iteration_id FK "迭代ID"
+        float progress "完成进度"
+        date planned_start "计划开始"
+        date planned_end "计划结束"
     }
+
     TASK {
-        string id PK
-        string story_id FK
-        string iteration_id FK
-        string title
-        string status
-        int token_cost
-        datetime start_time
-        datetime planned_end
-        datetime actual_end
-        string assignee
+        string id PK "唯一标识"
+        string title "标题"
+        string story_id FK "所属Story"
+        string iteration_id FK "所属迭代"
+        string status "状态"
+        string assignee "负责人"
+        date start_time "开始时间"
+        date actual_end "实际结束"
+        float token_cost "Token消耗"
+        int bug_count "关联Bug数"
     }
+
     BUG {
-        string id PK
-        string task_id FK
-        string title
-        string status
-        string severity
-        datetime created_at
-        datetime resolved_at
-        string reporter
+        string id PK "唯一标识"
+        string title "标题"
+        string task_id FK "关联Task"
+        string iteration_id FK "所属迭代"
+        string status "状态"
+        string severity "严重程度"
+        string reporter "报告人"
+        date created_at "创建时间"
+        date resolved_at "解决时间"
+        string fix_version "修复版本"
     }
+
     ITERATION {
-        string id PK
-        date date
-        string status
-        int total_tasks
-        int completed_tasks
-        int total_bugs
+        string id PK "唯一标识"
+        string name "迭代名称"
+        date start_date "开始日期"
+        date end_date "结束日期"
+        string status "迭代状态"
     }
+
     REVIEW {
-        string id PK
-        date date
-        string iteration_id FK
-        text output
-        text blockers
-        text risks
-        text improvements
-        int task_completed_count
-        int bug_fixed_count
+        string id PK "唯一标识"
+        string date PK "复盘日期"
+        string iteration_id FK "所属迭代"
+        int completed_tasks "完成任务数"
+        float total_token_cost "总Token消耗"
+        int new_bugs "新增Bug数"
+        int fixed_bugs "修复Bug数"
+        string summary "复盘总结"
     }
 ```
 
 ### 1.2 关联关系明细表
 
 | 关联类型 | 源实体 | 目标实体 | 关联字段 | 关系类型 | 约束说明 |
-|---------|--------|---------|---------|---------|---------|
-| 包含关系 | Story | Task | `story_id` | 1:N | 一个Story可包含多个Task，Task必须归属一个Story |
-| 产生关系 | Task | Bug | `task_id` | 1:N | 一个Task可产生多个Bug，Bug必须关联到具体Task |
-| 归属关系 | Task | Iteration | `iteration_id` | N:1 | 一个Task属于一个迭代，迭代可包含多个Task |
-| 追溯关系 | Bug | Review | `review_id` | N:1 | Bug在复盘中追溯处理情况，一个复盘可包含多个Bug |
-| 汇总关系 | Task | Review | `review_id` | N:1 | 已完成的Task在复盘中汇总，一个复盘汇总当日多个Task |
+|:---------|:-------|:---------|:---------|:---------|:---------|
+| 包含 | Story | Task | story_id | 一对多 (1:N) | Story必须存在，Task创建时必须指定Story |
+| 产生 | Task | Bug | task_id | 一对多 (1:N) | Bug必须关联到具体Task，自动继承iteration_id |
+| 归属 | Task | Iteration | iteration_id | 多对一 (N:1) | Task必须归属某个迭代 |
+| 归属 | Bug | Iteration | iteration_id | 多对一 (N:1) | Bug继承Task的iteration_id |
+| 规划 | Story | Iteration | iteration_id | 多对一 (N:1) | Story可跨迭代，但需指定主迭代 |
+| 追溯 | Bug | Review | review_id | 多对一 (N:1) | Bug在复盘时关联到当日Review |
+| 汇总 | Task | Review | review_id | 多对一 (N:1) | 当日完成的Task汇总到当日Review |
+| 关联 | Review | Iteration | iteration_id | 多对一 (N:1) | Review必须归属具体迭代 |
 
 ---
 
@@ -86,90 +99,104 @@ erDiagram
 stateDiagram-v2
     [*] --> 待办: 创建Task
     待办 --> 进行中: 开始执行
-    进行中 --> 已完成: 开发完成
+    进行中 --> 已完成: 完成开发
+    进行中 --> 待办: 暂停/回退
     已完成 --> 已验收: 验收通过
     已完成 --> 进行中: 验收不通过
-    进行中 --> 待办: 暂停/阻塞
-    待办 --> [*]: 取消
-    已验收 --> [*]: 归档
+    已验收 --> [*]: 关闭
+
+    note right of 待办
+        必须记录 start_time
+    end note
+
+    note right of 进行中
+        必须记录 actual_end
+        必须记录 token_cost
+    end note
+
+    note right of 已完成
+        必须由验收人确认
+        关联Bug已修复/标记
+    end note
 ```
 
-**状态说明**：
+#### 流转规则明细
 
-| 状态 | 说明 | 准入条件 | 退出动作 |
-|------|------|---------|---------|
-| 待办 | Task待开始 | Story已排期 | 记录开始时间 |
-| 进行中 | Task正在执行 | 已开始执行 | 记录token开销 |
-| 已完成 | 开发完成待验收 | 代码提交/自测通过 | 记录实际结束时间 |
-| 已验收 | 验收通过可发布 | 验收人确认通过 | 关联到复盘 |
-
-**流转规则**：
-- 从「待办」到「进行中」：必须记录 `start_time`
-- 从「进行中」到「已完成」：必须记录 `actual_end` 和 `token_cost`
-- 从「已完成」到「已验收」：必须由验收人确认，且关联的Bug已修复或已标记
+| 当前状态 | 目标状态 | 触发条件 | 必填字段 | 约束检查 |
+|:---------|:---------|:---------|:---------|:---------|
+| 待办 | 进行中 | 手动开始 | start_time | - |
+| 进行中 | 已完成 | 开发完成 | actual_end, token_cost | - |
+| 进行中 | 待办 | 暂停/回退 | - | 记录回退原因 |
+| 已完成 | 已验收 | 验收人确认 | reviewer, review_time | 关联Bug已修复或标记为延期 |
+| 已完成 | 进行中 | 验收不通过 | reject_reason | - |
+| 已验收 | - | 终态 | - | 不可再流转 |
 
 ### 2.2 Bug 状态流转
 
 ```mermaid
 stateDiagram-v2
-    [*] --> 新增: 发现Bug
-    新增 --> 修复中: 确认Bug
-    新增 --> 非Bug: 确认非Bug
-    新增 --> 需求设计问题: 需改需求
+    [*] --> 新增: 创建Bug
+    新增 --> 修复中: 分配修复人
     修复中 --> 已修复: 提交修复
-    已修复 --> 已验证: 验证通过
+    修复中 --> 新增: 修复失败
+    已修复 --> 已验证: QA验证通过
     已修复 --> 修复中: 验证不通过
-    已验证 --> 重复打开: 复现问题
-    重复打开 --> 修复中: 重新修复
-    非Bug --> [*]: 关闭
-    需求设计问题 --> [*]: 转需求流程
-    已验证 --> [*]: 归档
+    已验证 --> [*]: 关闭
+
+    note right of 新增
+        必须关联task_id
+    end note
+
+    note right of 修复中
+        必须记录修复版本/分支
+    end note
+
+    note right of 已修复
+        必须经过QA验证
+    end note
 ```
 
-**状态说明**：
+#### 流转规则明细
 
-| 状态 | 说明 | 准入条件 | 处理人 |
-|------|------|---------|--------|
-| 新增 | 刚发现的Bug | 测试或开发发现 | QA/开发 |
-| 修复中 | 正在修复的Bug | 确认为有效Bug | 开发 |
-| 已修复 | 代码已提交待验证 | 修复代码已合并 | 开发 |
-| 已验证 | 验证通过已关闭 | QA验收通过 | QA |
-| 重复打开 | 修复后再次复现 | QA验证发现未修复 | QA |
-| 非Bug | 确认为非缺陷 | 经确认非系统问题 | QA/产品 |
-| 需求设计问题 | 需修改需求设计 | 确认为设计问题 | 产品 |
-
-**流转规则**：
-- 从「新增」到「修复中」：必须关联到具体 `task_id`
-- 从「修复中」到「已修复」：必须记录修复版本/分支
-- 从「已修复」到「已验证」：必须经过QA验证
-- 「重复打开」状态必须记录复现原因
+| 当前状态 | 目标状态 | 触发条件 | 必填字段 | 约束检查 |
+|:---------|:---------|:---------|:---------|:---------|
+| 新增 | 修复中 | 分配修复人 | assignee, fix_branch | task_id必须存在 |
+| 修复中 | 已修复 | 提交修复 | fix_version, fix_commit | - |
+| 修复中 | 新增 | 修复失败 | fail_reason | - |
+| 已修复 | 已验证 | QA验证通过 | verifier, verify_time | - |
+| 已修复 | 修复中 | 验证不通过 | reject_reason | - |
+| 已验证 | - | 终态 | - | 不可再流转 |
 
 ### 2.3 Story 状态流转
 
 ```mermaid
 stateDiagram-v2
     [*] --> 待排期: 创建Story
-    待排期 --> 开发中: 开始迭代
+    待排期 --> 开发中: 开始开发
     开发中 --> 测试中: 开发完成
     测试中 --> 已发布: 测试通过
     测试中 --> 开发中: 测试不通过
-    开发中 --> 待排期: 暂停开发
-    已发布 --> [*]: 归档
+    已发布 --> [*]: 完成
+
+    note right of 开发中
+        根据关联Task状态自动流转:
+        任一Task进行中→Story开发中
+    end note
+
+    note right of 测试中
+        所有Task已完成→Story测试中
+    end note
 ```
 
-**状态说明**：
+#### Story 自动流转规则
 
-| 状态 | 说明 | 准入条件 |
-|------|------|---------|
-| 待排期 | Story待排期 | 已创建，优先级已确定 |
-| 开发中 | Story正在开发 | 已排入迭代，有Task进行中 |
-| 测试中 | Story开发完成待测试 | 所有Task已完成 |
-| 已发布 | Story已发布上线 | 测试通过，已上线 |
-
-**流转规则**：
-- Story状态根据关联Task状态自动流转
-- 所有Task完成 → Story自动变为「测试中」
-- 有Task进行中 → Story保持「开发中」
+| Story当前状态 | 关联Task状态条件 | 自动流转至 |
+|:--------------|:-----------------|:-----------|
+| 待排期 | 任一Task状态为"进行中" | 开发中 |
+| 开发中 | 所有Task状态为"已完成"或"已验收" | 测试中 |
+| 测试中 | 所有Task状态为"已验收" | 已发布 |
+| 开发中 | 所有Task回退至"待办" | 待排期 |
+| 测试中 | 任一Task回退至"进行中" | 开发中 |
 
 ---
 
@@ -177,107 +204,214 @@ stateDiagram-v2
 
 ### 3.1 Bug 创建时关联 Task
 
-**触发条件**：
-- Bug 被创建时
-- Bug 状态为「新增」
+#### 触发条件
+- 事件：Bug被创建
+- 状态："新增"
+- 优先级：P1（必须处理）
 
-**执行动作**：
-1. 检查 Bug 是否已关联 `task_id`
-2. 若未关联，提示创建者选择关联 Task
-3. 获取关联 Task 的 `iteration_id`，同步到 Bug
-4. 更新关联 Task 的 `bug_count` 字段
+#### 执行动作
+1. **检查task_id关联**
+   - 验证task_id是否存在
+   - 若未指定，阻止创建并提示
 
-**API 调用示例**：
-```json
-{
-  "event": "bug.created",
-  "condition": {
-    "status": "新增",
-    "task_id": null
-  },
-  "action": {
-    "type": "prompt_relation",
-    "field": "task_id",
-    "required": true
-  }
-}
+2. **同步iteration_id**
+   - 从关联Task读取iteration_id
+   - 自动填充到Bug记录
+
+3. **更新Task统计**
+   - Task.bug_count += 1
+   - 更新Story的总bug计数
+
+4. **发送通知**
+   - 通知Task负责人有新Bug
+   - 通知Story负责人
+
+#### 伪代码实现
+```python
+def on_bug_created(bug):
+    if not bug.task_id:
+        raise ValidationError("Bug必须关联到具体Task")
+    
+    task = get_task(bug.task_id)
+    bug.iteration_id = task.iteration_id
+    
+    task.bug_count += 1
+    task.save()
+    
+    notify(task.assignee, f"Task有新的Bug: {bug.title}")
+    notify_story_owner(task.story_id)
 ```
 
 ### 3.2 Task 完成时触发验收
 
-**触发条件**：
-- Task 状态从「进行中」变为「已完成」
-- Task 已记录 `actual_end` 时间
+#### 触发条件
+- 事件：Task状态变更
+- 从："进行中"
+- 至："已完成"
 
-**执行动作**：
-1. 自动通知验收人（Story负责人或PM）
-2. 检查关联 Bug 状态，如有未修复Bug，标记阻塞
-3. 发送验收提醒到相关频道
-4. 更新 Story 的完成进度
+#### 执行动作
+1. **通知验收人**
+   - 发送验收提醒（Slack/邮件）
+   - 包含Task详情和链接
 
-**API 调用示例**：
-```json
-{
-  "event": "task.status_changed",
-  "condition": {
-    "from": "进行中",
-    "to": "已完成"
-  },
-  "actions": [
-    {
-      "type": "notify",
-      "target": "reviewer",
-      "message": "Task {title} 已完成，请验收"
-    },
-    {
-      "type": "check_bugs",
-      "block_if_unresolved": true
-    },
-    {
-      "type": "update_story_progress",
-      "story_id": "{story_id}"
-    }
-  ]
-}
+2. **检查关联Bug状态**
+   - 查询该Task的所有Bug
+   - 检查是否存在未修复Bug
+   - 生成Bug状态报告
+
+3. **更新Story进度**
+   - 重新计算Story完成百分比
+   - 更新Story.progress字段
+
+4. **记录完成数据**
+   - 确保actual_end已记录
+   - 确保token_cost已记录
+
+#### 伪代码实现
+```python
+def on_task_completed(task):
+    # 记录完成数据
+    task.actual_end = now()
+    task.save()
+    
+    # 通知验收人
+    send_review_notification(task)
+    
+    # 检查关联Bug
+    bugs = get_bugs_by_task(task.id)
+    open_bugs = [b for b in bugs if b.status != "已验证"]
+    
+    if open_bugs:
+        warn(f"Task有{len(open_bugs)}个未关闭Bug")
+    
+    # 更新Story进度
+    update_story_progress(task.story_id)
 ```
 
 ### 3.3 复盘时汇总当日 Task/Bug
 
-**触发条件**：
-- 每日复盘记录被创建
-- 日期为当天
+#### 触发条件
+- 事件：Review记录被创建
+- 条件：date字段为当天日期
+- 触发方式：自动（定时任务）或手动
 
-**执行动作**：
-1. 查询当日 Iteration 的所有 Task
-2. 统计已完成 Task 数量、token 开销总计
-3. 查询当日新建和修复的 Bug
-4. 自动填充到复盘记录对应字段
-5. 识别阻塞状态的 Task，自动填入「阻塞」栏
+#### 执行动作
+1. **查询当日Iteration数据**
+   - 获取当前活跃Iteration
+   - 查询该Iteration下所有Task
 
-**汇总规则**：
+2. **统计Task完成情况**
+   - 已完成Task数量
+   - 总Token消耗
+   - 按Story分组统计
 
-| 复盘字段 | 数据来源 | 统计规则 |
-|---------|---------|---------|
-| 当日产出 | Task（已完成/已验收） | 列出所有已完成的Task标题 |
-| token开销 | Task.token_cost | 求和当日已完成Task的token_cost |
-| 完成数量 | Task | 统计当日状态变为「已完成」或「已验收」的Task数 |
-| 新建Bug | Bug | 统计当日创建的Bug数 |
-| 修复Bug | Bug | 统计当日状态变为「已验证」的Bug数 |
-| 阻塞项 | Task（状态=进行中但有阻塞） | 列出有阻塞标记的Task |
-| 风险项 | Bug（高优先级未修复） | 列出P0/P1级别未修复Bug |
+3. **统计Bug情况**
+   - 当日新建Bug数
+   - 当日修复Bug数
+   - 严重Bug列表
+
+4. **自动填充Review记录**
+   - 将统计数据写入Review字段
+   - 生成复盘摘要
+
+#### 汇总规则表
+
+| Review字段 | 数据来源 | 统计规则 | 计算公式 |
+|:-----------|:---------|:---------|:---------|
+| completed_tasks | Task表 | 当日状态为"已验收"的Task数 | COUNT(task WHERE status='已验收' AND actual_end=Today) |
+| total_token_cost | Task表 | 当日完成Task的Token总和 | SUM(token_cost WHERE actual_end=Today) |
+| new_bugs | Bug表 | 当日创建的Bug数 | COUNT(bug WHERE created_at=Today) |
+| fixed_bugs | Bug表 | 当日状态变为"已验证"的Bug数 | COUNT(bug WHERE resolved_at=Today AND status='已验证') |
+| pending_bugs | Bug表 | 未修复的Bug数 | COUNT(bug WHERE status!='已验证') |
+| task_by_story | Task+Story表 | 按Story分组的完成Task | GROUP_BY(story_id, COUNT(task)) |
+| bug_severity | Bug表 | 按严重级别统计 | GROUP_BY(severity, COUNT(bug)) |
+
+#### 伪代码实现
+```python
+def on_daily_review_created(review):
+    today = review.date
+    iteration = get_active_iteration(today)
+    
+    # 统计当日完成任务
+    completed = query_tasks(
+        iteration_id=iteration.id,
+        status='已验收',
+        actual_end=today
+    )
+    
+    review.completed_tasks = len(completed)
+    review.total_token_cost = sum(t.token_cost for t in completed)
+    
+    # 统计当日Bug
+    new_bugs = query_bugs(
+        iteration_id=iteration.id,
+        created_at=today
+    )
+    review.new_bugs = len(new_bugs)
+    
+    fixed_bugs = query_bugs(
+        iteration_id=iteration.id,
+        resolved_at=today,
+        status='已验证'
+    )
+    review.fixed_bugs = len(fixed_bugs)
+    
+    # 生成摘要
+    review.summary = generate_review_summary(review)
+    review.save()
+```
 
 ### 3.4 迭代结束时归档数据
 
-**触发条件**：
-- Iteration 日期结束（次日0点）
-- 或手动触发「迭代归档」
+#### 触发条件
+- 自动触发：Iteration.end_date到达
+- 手动触发：点击"迭代归档"按钮
+- 事件类型：迭代结束
 
-**执行动作**：
-1. 统计迭代期间所有 Task 完成情况
-2. 统计迭代期间所有 Bug 产生与修复情况
-3. 生成迭代报告
-4. 将已完成的 Task/Bug 标记为「已归档」
-5. 未完成的 Task 自动转入下一个迭代（可选）
+#### 执行动作
+1. **统计迭代数据**
+   - 总Task数、完成Task数
+   - 总Bug数、修复Bug数
+   - 平均Token消耗
+   - 延期Task列表
+
+2. **生成迭代报告**
+   - 创建迭代总结文档
+   - 包含统计数据和图表
+   - 导出为PDF/Markdown
+
+3. **归档数据**
+   - 将已完成Task标记为"已归档"
+   - 将已验证Bug标记为"已归档"
+   - 保留活跃Story到下一迭代
+
+4. **创建复盘记录**
+   - 生成迭代整体Review
+   - 关联所有迭代内Review
+
+#### 伪代码实现
+```python
+def on_iteration_closed(iteration):
+    # 统计数据
+    stats = {
+        'total_tasks': count_tasks(iteration.id),
+        'completed_tasks': count_tasks(iteration.id, status='已验收'),
+        'total_bugs': count_bugs(iteration.id),
+        'fixed_bugs': count_bugs(iteration.id, status='已验证'),
+        'total_tokens': sum_token_cost(iteration.id),
+        'delayed_tasks': get_delayed_tasks(iteration.id)
+    }
+    
+    # 生成报告
+    report = generate_iteration_report(iteration, stats)
+    
+    # 归档数据
+    archive_tasks(iteration.id)
+    archive_bugs(iteration.id)
+    
+    # 创建迭代复盘
+    create_iteration_review(iteration, stats)
+```
 
 ---
 
@@ -287,443 +421,581 @@ stateDiagram-v2
 
 #### Task 必填字段
 
-| 字段名 | 必填时机 | 校验规则 |
-|--------|---------|---------|
-| title | 创建时 | 非空，长度1-200字符 |
-| story_id | 创建时 | 必须存在对应Story |
-| status | 创建时 | 枚举值：待办/进行中/已完成/已验收 |
-| iteration_id | 创建时 | 必须存在对应Iteration |
-| start_time | 状态变为「进行中」时 | 有效时间戳 |
-| actual_end | 状态变为「已完成」时 | 有效时间戳，且晚于start_time |
-| token_cost | 状态变为「已完成」时 | 非负整数 |
+| 字段名 | 类型 | 必填时机 | 校验规则 |
+|:-------|:-----|:---------|:---------|
+| title | string | 创建时 | 长度1-200字符 |
+| story_id | relation | 创建时 | 必须关联存在的Story |
+| status | select | 创建时 | 必须为有效状态值 |
+| iteration_id | relation | 创建时 | 必须关联存在的Iteration |
+| start_time | date | 状态变为"进行中"时 | 不能晚于当前时间 |
+| actual_end | date | 状态变为"已完成"时 | 必须晚于start_time |
+| token_cost | number | 状态变为"已完成"时 | 必须>=0 |
+| assignee | person | 创建时 | 必须指定负责人 |
 
 #### Bug 必填字段
 
-| 字段名 | 必填时机 | 校验规则 |
-|--------|---------|---------|
-| title | 创建时 | 非空，长度1-200字符 |
-| task_id | 创建时 | 必须存在对应Task |
-| status | 创建时 | 枚举值：新增/修复中/已修复/已验证/重复打开/非Bug/需求设计问题 |
-| severity | 创建时 | 枚举值：P0/P1/P2/P3 |
-| reporter | 创建时 | 非空 |
-| created_at | 创建时 | 自动填充当前时间 |
-| resolved_at | 状态变为「已验证」时 | 有效时间戳 |
+| 字段名 | 类型 | 必填时机 | 校验规则 |
+|:-------|:-----|:---------|:---------|
+| title | string | 创建时 | 长度1-200字符 |
+| task_id | relation | 创建时 | 必须关联存在的Task |
+| status | select | 创建时 | 必须为有效状态值 |
+| severity | select | 创建时 | 必须为P0/P1/P2/P3 |
+| reporter | person | 创建时 | 必须指定报告人 |
+| created_at | datetime | 创建时 | 自动填充 |
+| resolved_at | datetime | 状态变为"已修复"时 | 必须晚于created_at |
+| fix_version | string | 状态变为"已修复"时 | 不能为空 |
 
 #### Story 必填字段
 
-| 字段名 | 必填时机 | 校验规则 |
-|--------|---------|---------|
-| title | 创建时 | 非空，长度1-200字符 |
-| status | 创建时 | 枚举值：待排期/开发中/测试中/已发布 |
-| priority | 创建时 | 枚举值：P0/P1/P2/P3 |
+| 字段名 | 类型 | 必填时机 | 校验规则 |
+|:-------|:-----|:---------|:---------|
+| title | string | 创建时 | 长度1-200字符 |
+| status | select | 创建时 | 必须为有效状态值 |
+| priority | select | 创建时 | 必须为P0/P1/P2/P3 |
+| iteration_id | relation | 创建时 | 推荐填写 |
+| planned_start | date | 状态变为"待排期"时 | - |
+| planned_end | date | 状态变为"待排期"时 | 必须晚于planned_start |
 
 ### 4.2 状态转换合法性检查
 
-```mermaid
-flowchart TD
-    A[状态变更请求] --> B{检查当前状态}
-    B -->|待办| C[允许: 进行中/取消]
-    B -->|进行中| D[允许: 已完成/待办]
-    B -->|已完成| E[允许: 已验收/进行中]
-    B -->|已验收| F[允许: 归档]
-    
-    C --> G{检查必填字段}
-    D --> G
-    E --> G
-    F --> G
-    
-    G -->|字段完整| H[允许变更]
-    G -->|字段缺失| I[拒绝变更并提示]
-    H --> J[更新状态]
-    I --> K[返回错误信息]
-```
+#### Task 状态转换矩阵
 
-**状态转换矩阵**：
+| 当前状态 \ 目标状态 | 待办 | 进行中 | 已完成 | 已验收 |
+|:--------------------|:----:|:------:|:------:|:------:|
+| **待办** | - | ✅ | ❌ | ❌ |
+| **进行中** | ✅ | - | ✅ | ❌ |
+| **已完成** | ❌ | ✅ | - | ✅ |
+| **已验收** | ❌ | ❌ | ❌ | - |
 
-| 当前状态\目标状态 | 待办 | 进行中 | 已完成 | 已验收 | 取消/归档 |
-|-----------------|------|--------|--------|--------|----------|
-| 待办 | ✓ | ✓ | ✗ | ✗ | ✓ |
-| 进行中 | ✓ | ✓ | ✓ | ✗ | ✗ |
-| 已完成 | ✗ | ✓ | ✓ | ✓ | ✗ |
-| 已验收 | ✗ | ✗ | ✗ | ✓ | ✓ |
+#### Bug 状态转换矩阵
+
+| 当前状态 \ 目标状态 | 新增 | 修复中 | 已修复 | 已验证 |
+|:--------------------|:----:|:------:|:------:|:------:|
+| **新增** | - | ✅ | ❌ | ❌ |
+| **修复中** | ✅ | - | ✅ | ❌ |
+| **已修复** | ❌ | ✅ | - | ✅ |
+| **已验证** | ❌ | ❌ | ❌ | - |
+
+#### Story 状态转换矩阵
+
+| 当前状态 \ 目标状态 | 待排期 | 开发中 | 测试中 | 已发布 |
+|:--------------------|:------:|:------:|:------:|:------:|
+| **待排期** | - | ✅ | ❌ | ❌ |
+| **开发中** | ✅ | - | ✅ | ❌ |
+| **测试中** | ❌ | ✅ | - | ✅ |
+| **已发布** | ❌ | ❌ | ❌ | - |
 
 ### 4.3 关联完整性规则
 
-**规则1：Task 必须归属 Story**
-```python
-# 伪代码
-def validate_task(task):
-    if not task.story_id:
-        raise ValidationError("Task 必须关联到 Story")
-    if not Story.exists(task.story_id):
-        raise ValidationError("关联的 Story 不存在")
+#### 规则1：Task必须归属Story
+```
+约束：task.story_id IS NOT NULL
+触发：创建Task时
+动作：阻止创建，提示"必须选择所属Story"
+级联：删除Story时，级联删除/归档关联Task
 ```
 
-**规则2：Bug 必须关联 Task**
-```python
-def validate_bug(bug):
-    if not bug.task_id:
-        raise ValidationError("Bug 必须关联到 Task")
-    if not Task.exists(bug.task_id):
-        raise ValidationError("关联的 Task 不存在")
-    # 自动继承 iteration_id
-    task = Task.get(bug.task_id)
-    bug.iteration_id = task.iteration_id
+#### 规则2：Bug必须关联Task（自动继承iteration_id）
+```
+约束：bug.task_id IS NOT NULL
+触发：创建Bug时
+动作：阻止创建，提示"必须关联具体Task"
+级联：
+  - 自动设置 bug.iteration_id = task.iteration_id
+  - Task删除时，提示先处理关联Bug
 ```
 
-**规则3：Review 必须关联 Iteration**
-```python
-def validate_review(review):
-    if not review.iteration_id:
-        # 自动查找或创建当日Iteration
-        review.iteration_id = Iteration.get_or_create(review.date)
+#### 规则3：Review必须关联Iteration
+```
+约束：review.iteration_id IS NOT NULL
+触发：创建Review时
+动作：
+  - 若未指定，自动关联当前活跃Iteration
+  - 若无活跃Iteration，阻止创建
 ```
 
-**规则4：级联更新规则**
-```python
-# Story 状态根据 Task 状态自动更新
-def update_story_status(story):
-    tasks = Task.get_by_story(story.id)
-    if all(t.status == "已验收" for t in tasks):
-        story.status = "测试中"
-    elif any(t.status in ["进行中", "已完成"] for t in tasks):
-        story.status = "开发中"
+#### 规则4：Story状态根据Task状态自动更新
+```
+触发：Task状态变更
+规则：
+  IF ANY(task.status == '进行中') THEN story.status = '开发中'
+  ELSE IF ALL(task.status IN ['已完成', '已验收']) THEN story.status = '测试中'
+  ELSE IF ALL(task.status == '已验收') THEN story.status = '已发布'
+  ELSE IF ALL(task.status == '待办') THEN story.status = '待排期'
+```
+
+#### 规则5：删除约束
+```
+删除Story前：
+  - 检查是否存在关联Task
+  - 提示用户选择：级联删除 / 转移至其他Story / 取消
+
+删除Task前：
+  - 检查是否存在关联Bug
+  - 提示用户选择：级联删除Bug / 转移至其他Task / 取消
+
+删除Iteration前：
+  - 检查是否存在关联Story/Task/Bug/Review
+  - 必须为空才能删除，或执行归档操作
 ```
 
 ---
 
-## 5. 自动化规则建议
+## 5. API 集成参考
 
-### 5.1 Notion Automation 配置建议
-
-#### 配置1：Task 状态变更自动更新时间
-
-```yaml
-automation:
-  name: "Task自动记录时间"
-  trigger:
-    type: "status_changed"
-    database: "Task"
-  conditions:
-    - field: "status"
-      from: "待办"
-      to: "进行中"
-  actions:
-    - type: "set_property"
-      field: "start_time"
-      value: "now()"
-```
-
-#### 配置2：Bug 创建自动通知负责人
-
-```yaml
-automation:
-  name: "Bug创建通知"
-  trigger:
-    type: "page_created"
-    database: "Bug"
-  conditions: []
-  actions:
-    - type: "send_slack_notification"
-      channel: "#dev-bugs"
-      message: "🔴 新Bug: {title}\n关联Task: {task.title}\n报告人: {reporter}"
-```
-
-#### 配置3：每日复盘自动汇总
-
-```yaml
-automation:
-  name: "每日复盘数据汇总"
-  trigger:
-    type: "scheduled"
-    schedule: "0 18 * * *"  # 每天18:00
-  actions:
-    - type: "query_database"
-      database: "Task"
-      filter:
-        iteration.date: "today"
-        status: "已验收"
-      save_to: "completed_tasks"
-    - type: "query_database"
-      database: "Bug"
-      filter:
-        created_at: "today"
-      save_to: "new_bugs"
-    - type: "create_page"
-      database: "Review"
-      properties:
-        date: "today"
-        task_completed_count: "{completed_tasks.count}"
-        bug_fixed_count: "{new_bugs.count}"
-        output: "{completed_tasks.list}"
-```
-
-### 5.2 Webhook 触发场景
-
-#### 场景1：Task 状态变更 Webhook
-
-```json
-{
-  "webhook": {
-    "url": "https://api.infinity.company/webhooks/task-status",
-    "events": ["task.created", "task.updated", "task.status_changed"],
-    "payload": {
-      "event": "{event_type}",
-      "task_id": "{task.id}",
-      "story_id": "{task.story_id}",
-      "old_status": "{old_status}",
-      "new_status": "{new_status}",
-      "timestamp": "{timestamp}"
-    }
-  }
-}
-```
-
-#### 场景2：Bug 状态变更 Webhook
-
-```json
-{
-  "webhook": {
-    "url": "https://api.infinity.company/webhooks/bug-status",
-    "events": ["bug.created", "bug.status_changed", "bug.resolved"],
-    "payload": {
-      "event": "{event_type}",
-      "bug_id": "{bug.id}",
-      "task_id": "{bug.task_id}",
-      "severity": "{bug.severity}",
-      "status": "{bug.status}",
-      "timestamp": "{timestamp}"
-    }
-  }
-}
-```
-
-### 5.3 定时同步任务
-
-#### 任务1：每日数据同步
+### 5.1 Notion API 配置
 
 ```python
-# sync_daily.py
-def daily_sync():
-    """每日18:00执行的数据同步任务"""
-    # 1. 同步当日Task完成情况
-    today_tasks = query_tasks(date=today, status=["已完成", "已验收"])
-    
-    # 2. 同步当日Bug情况
-    today_bugs_created = query_bugs(created_at=today)
-    today_bugs_resolved = query_bugs(resolved_at=today)
-    
-    # 3. 更新或创建复盘记录
-    review = get_or_create_review(date=today)
-    review.task_completed_count = len(today_tasks)
-    review.bug_fixed_count = len(today_bugs_resolved)
-    review.output = format_task_list(today_tasks)
-    review.save()
-    
-    # 4. 发送日报通知
-    send_daily_report(review)
-```
-
-#### 任务2：迭代归档任务
-
-```python
-# archive_iteration.py
-def archive_iteration(iteration_id):
-    """迭代结束时执行归档"""
-    iteration = get_iteration(iteration_id)
-    
-    # 1. 统计迭代数据
-    stats = {
-        "total_tasks": count_tasks(iteration_id=iteration_id),
-        "completed_tasks": count_tasks(iteration_id=iteration_id, status="已验收"),
-        "total_bugs": count_bugs(iteration_id=iteration_id),
-        "fixed_bugs": count_bugs(iteration_id=iteration_id, status="已验证"),
-        "total_token_cost": sum_token_cost(iteration_id=iteration_id)
-    }
-    
-    # 2. 生成迭代报告
-    report = generate_iteration_report(iteration, stats)
-    
-    # 3. 归档已完成的Task和Bug
-    archive_completed_items(iteration_id)
-    
-    # 4. 更新迭代状态
-    iteration.status = "已归档"
-    iteration.stats = stats
-    iteration.save()
-```
-
-#### 任务3：数据一致性检查
-
-```python
-# consistency_check.py
-def consistency_check():
-    """每小时执行一次的数据一致性检查"""
-    issues = []
-    
-    # 检查1: 孤儿Task（无Story关联）
-    orphan_tasks = query_tasks(story_id=None)
-    for task in orphan_tasks:
-        issues.append(f"Task {task.id} 未关联Story")
-    
-    # 检查2: 孤儿Bug（无Task关联）
-    orphan_bugs = query_bugs(task_id=None)
-    for bug in orphan_bugs:
-        issues.append(f"Bug {bug.id} 未关联Task")
-    
-    # 检查3: 状态不一致（已完成但未记录时间）
-    invalid_tasks = query_tasks(status="已完成", actual_end=None)
-    for task in invalid_tasks:
-        issues.append(f"Task {task.id} 状态已完成但未记录实际结束时间")
-    
-    # 检查4: Story状态与Task状态不一致
-    for story in query_stories():
-        expected_status = calculate_expected_story_status(story)
-        if story.status != expected_status:
-            issues.append(f"Story {story.id} 状态应为 {expected_status}，实际为 {story.status}")
-    
-    # 发送检查报告
-    if issues:
-        send_alert("数据一致性检查发现问题", issues)
-```
-
-### 5.4 自动化配置汇总表
-
-| 自动化规则 | 触发方式 | 执行频率 | 优先级 |
-|-----------|---------|---------|--------|
-| Task自动记录时间 | 状态变更 | 实时 | P0 |
-| Bug创建自动通知 | 页面创建 | 实时 | P0 |
-| 每日复盘数据汇总 | 定时触发 | 每日18:00 | P1 |
-| 迭代结束自动归档 | 定时触发/手动 | 每日00:00 | P1 |
-| 数据一致性检查 | 定时触发 | 每小时 | P2 |
-| Story状态自动更新 | 关联Task变更 | 实时 | P2 |
-| 未完成任务提醒 | 定时触发 | 每日17:00 | P2 |
-| Bug逾期未修复提醒 | 定时触发 | 每日09:00 | P2 |
-
----
-
-## 6. API 集成参考
-
-### 6.1 Notion API 配置示例
-
-```python
-# notion_config.py
+# API密钥
 NOTION_API_KEY = "<YOUR_NOTION_API_KEY>"
 
-DATABASE_IDS = {
-    "story": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-    "task": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-    "bug": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-    "iteration": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-    "review": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+# 数据库ID（示例，需替换为实际ID）
+DATABASES = {
+    "story": "your-story-database-id",
+    "task": "your-task-database-id",
+    "bug": "your-bug-database-id",
+    "iteration": "your-iteration-database-id",
+    "review": "your-review-database-id"
 }
 
-# 关联属性配置
-RELATION_PROPERTIES = {
-    "task": {
-        "story_relation": "Story",
-        "iteration_relation": "Iteration"
-    },
-    "bug": {
-        "task_relation": "Task"
-    },
-    "review": {
-        "iteration_relation": "Iteration"
-    }
-}
-
-# Rollup 属性配置
-ROLLUP_PROPERTIES = {
-    "story": {
-        "task_count": {
-            "relation": "Tasks",
-            "function": "count"
-        },
-        "completed_task_count": {
-            "relation": "Tasks",
-            "filter": {"status": "已验收"},
-            "function": "count"
-        }
-    },
-    "iteration": {
-        "total_token_cost": {
-            "relation": "Tasks",
-            "property": "token_cost",
-            "function": "sum"
-        },
-        "bug_count": {
-            "relation": "Bugs",
-            "function": "count"
-        }
-    }
-}
+# API基础URL
+NOTION_API_BASE = "https://api.notion.com/v1"
+NOTION_VERSION = "2022-06-28"
 ```
 
-### 6.2 常用查询示例
+### 5.2 关系配置代码
 
 ```python
-# 查询当日需要复盘的Task
-async def get_today_completed_tasks():
-    return await notion.databases.query(
-        database_id=DATABASE_IDS["task"],
+from notion_client import Client
+
+notion = Client(auth=NOTION_API_KEY)
+
+def create_relation_property(database_id, property_name, related_db_id):
+    """创建关系属性"""
+    notion.databases.update(
+        database_id=database_id,
+        properties={
+            property_name: {
+                "relation": {
+                    "database_id": related_db_id,
+                    "type": "single_property"
+                }
+            }
+        }
+    )
+
+def create_rollup_property(database_id, property_name, relation_name, rollup_key, function="show_original"):
+    """创建Rollup属性"""
+    notion.databases.update(
+        database_id=database_id,
+        properties={
+            property_name: {
+                "rollup": {
+                    "relation_property_name": relation_name,
+                    "rollup_property_name": rollup_key,
+                    "function": function
+                }
+            }
+        }
+    )
+
+# 示例：配置Story数据库
+config_story_relations()
+def config_story_relations():
+    # Task -> Story 关系
+    create_relation_property(
+        DATABASES["task"], 
+        "story_relation", 
+        DATABASES["story"]
+    )
+    
+    # Story -> Task Rollup（统计Task数量）
+    create_rollup_property(
+        DATABASES["story"],
+        "task_count",
+        "task_relation",
+        "title",
+        function="count"
+    )
+    
+    # Story -> Task Rollup（完成进度）
+    create_rollup_property(
+        DATABASES["story"],
+        "completed_task_count",
+        "task_relation",
+        "status",
+        function="count_values"
+    )
+```
+
+### 5.3 Rollup 配置示例
+
+```python
+ROLLUP_CONFIGS = {
+    # Story数据库Rollup
+    "story": {
+        "task_count": {
+            "relation": "task_relation",
+            "rollup": "title",
+            "function": "count"
+        },
+        "bug_count": {
+            "relation": "bug_relation",
+            "rollup": "title",
+            "function": "count"
+        },
+        "progress": {
+            "relation": "task_relation",
+            "rollup": "status",
+            "function": "percent_performed"  # 自定义计算
+        }
+    },
+    
+    # Task数据库Rollup
+    "task": {
+        "bug_count": {
+            "relation": "bug_relation",
+            "rollup": "title",
+            "function": "count"
+        },
+        "story_title": {
+            "relation": "story_relation",
+            "rollup": "title",
+            "function": "show_original"
+        }
+    },
+    
+    # Review数据库Rollup
+    "review": {
+        "task_completed": {
+            "relation": "task_relation",
+            "rollup": "status",
+            "function": "count_values"
+        },
+        "total_token_cost": {
+            "relation": "task_relation",
+            "rollup": "token_cost",
+            "function": "sum"
+        }
+    }
+}
+
+def apply_rollup_configs():
+    """应用所有Rollup配置"""
+    for db_name, configs in ROLLUP_CONFIGS.items():
+        for prop_name, config in configs.items():
+            create_rollup_property(
+                DATABASES[db_name],
+                prop_name,
+                config["relation"],
+                config["rollup"],
+                config["function"]
+            )
+```
+
+### 5.4 常用查询代码
+
+```python
+def query_tasks_by_story(story_id):
+    """查询Story下的所有Task"""
+    return notion.databases.query(
+        database_id=DATABASES["task"],
+        filter={
+            "property": "story_relation",
+            "relation": {
+                "contains": story_id
+            }
+        }
+    )
+
+def query_bugs_by_task(task_id):
+    """查询Task下的所有Bug"""
+    return notion.databases.query(
+        database_id=DATABASES["bug"],
+        filter={
+            "property": "task_relation",
+            "relation": {
+                "contains": task_id
+            }
+        }
+    )
+
+def query_today_completed_tasks(iteration_id):
+    """查询当日完成的Task"""
+    from datetime import datetime
+    today = datetime.now().strftime("%Y-%m-%d")
+    
+    return notion.databases.query(
+        database_id=DATABASES["task"],
         filter={
             "and": [
-                {"property": "Iteration", "relation": {"contains": today_iteration_id}},
-                {"property": "Status", "select": {"equals": "已验收"}}
+                {
+                    "property": "iteration_relation",
+                    "relation": {"contains": iteration_id}
+                },
+                {
+                    "property": "status",
+                    "select": {"equals": "已验收"}
+                },
+                {
+                    "property": "actual_end",
+                    "date": {"equals": today}
+                }
             ]
         }
     )
 
-# 查询指定Task关联的所有Bug
-async def get_task_bugs(task_id: str):
-    return await notion.databases.query(
-        database_id=DATABASE_IDS["bug"],
+def query_tasks_by_status(story_id, status):
+    """查询Story下特定状态的Task"""
+    return notion.databases.query(
+        database_id=DATABASES["task"],
         filter={
-            "property": "Task", "relation": {"contains": task_id}
+            "and": [
+                {
+                    "property": "story_relation",
+                    "relation": {"contains": story_id}
+                },
+                {
+                    "property": "status",
+                    "select": {"equals": status}
+                }
+            ]
+        }
+    )
+
+def update_story_progress(story_id):
+    """更新Story完成进度"""
+    all_tasks = query_tasks_by_story(story_id)
+    total = len(all_tasks["results"])
+    
+    if total == 0:
+        progress = 0
+    else:
+        completed = len([
+            t for t in all_tasks["results"]
+            if t["properties"]["status"]["select"]["name"] == "已验收"
+        ])
+        progress = completed / total * 100
+    
+    notion.pages.update(
+        page_id=story_id,
+        properties={
+            "progress": {"number": progress}
         }
     )
 ```
 
 ---
 
-## 7. 附录
+## 6. 附录
 
-### 7.1 状态枚举定义
+### 6.1 状态枚举定义（JSON格式）
 
 ```json
 {
-  "story_status": ["待排期", "开发中", "测试中", "已发布"],
-  "task_status": ["待办", "进行中", "已完成", "已验收"],
-  "bug_status": ["新增", "修复中", "已修复", "已验证", "重复打开", "非Bug", "需求设计问题"],
-  "priority": ["P0", "P1", "P2", "P3"],
-  "severity": ["P0", "P1", "P2", "P3"]
+  "status_enums": {
+    "task": {
+      "values": ["待办", "进行中", "已完成", "已验收"],
+      "colors": {
+        "待办": "gray",
+        "进行中": "blue",
+        "已完成": "green",
+        "已验收": "purple"
+      }
+    },
+    "bug": {
+      "values": ["新增", "修复中", "已修复", "已验证"],
+      "colors": {
+        "新增": "red",
+        "修复中": "yellow",
+        "已修复": "blue",
+        "已验证": "green"
+      }
+    },
+    "story": {
+      "values": ["待排期", "开发中", "测试中", "已发布"],
+      "colors": {
+        "待排期": "gray",
+        "开发中": "blue",
+        "测试中": "yellow",
+        "已发布": "green"
+      }
+    },
+    "iteration": {
+      "values": ["规划中", "进行中", "已结束", "已归档"],
+      "colors": {
+        "规划中": "gray",
+        "进行中": "blue",
+        "已结束": "purple",
+        "已归档": "brown"
+      }
+    },
+    "priority": {
+      "values": ["P0", "P1", "P2", "P3"],
+      "colors": {
+        "P0": "red",
+        "P1": "orange",
+        "P2": "yellow",
+        "P3": "gray"
+      }
+    },
+    "severity": {
+      "values": ["致命", "严重", "一般", "提示"],
+      "colors": {
+        "致命": "red",
+        "严重": "orange",
+        "一般": "yellow",
+        "提示": "gray"
+      }
+    }
+  }
 }
 ```
 
-### 7.2 字段类型映射
+### 6.2 字段类型映射表
 
-| 实体 | 字段 | Notion类型 | 说明 |
-|------|------|-----------|------|
-| Story | title | Title | 需求标题 |
-| Story | status | Select | 需求状态 |
-| Story | priority | Select | 优先级 |
-| Task | title | Title | 任务标题 |
-| Task | status | Select | 任务状态 |
-| Task | story_id | Relation | 关联Story |
-| Task | iteration_id | Relation | 关联迭代 |
-| Task | token_cost | Number | Token开销 |
-| Task | start_time | Date | 开始时间 |
-| Task | actual_end | Date | 实际结束时间 |
-| Bug | title | Title | Bug标题 |
-| Bug | status | Select | Bug状态 |
-| Bug | task_id | Relation | 关联Task |
-| Bug | severity | Select | 严重级别 |
-| Iteration | date | Date | 迭代日期 |
-| Review | date | Date | 复盘日期 |
-| Review | iteration_id | Relation | 关联迭代 |
+| 字段名 | Notion类型 | Python类型 | 说明 |
+|:-------|:-----------|:-----------|:-----|
+| title | title | str | 标题字段 |
+| status | select | str | 单选状态 |
+| priority | select | str | 优先级 |
+| severity | select | str | 严重程度 |
+| assignee | people | List[str] | 负责人 |
+| reporter | people | str | 报告人 |
+| story_id | relation | str | 关联Story |
+| task_id | relation | str | 关联Task |
+| iteration_id | relation | str | 关联迭代 |
+| start_time | date | datetime | 开始时间 |
+| actual_end | date | datetime | 实际结束 |
+| created_at | created_time | datetime | 创建时间 |
+| resolved_at | date | datetime | 解决时间 |
+| token_cost | number | float | Token消耗 |
+| bug_count | number | int | Bug计数 |
+| progress | number | float | 完成进度(%) |
+| fix_version | rich_text | str | 修复版本 |
+| summary | rich_text | str | 复盘总结 |
+| task_count | rollup | int | 关联Task数（自动） |
+| completed_task_count | rollup | int | 已完成Task数（自动） |
+
+### 6.3 数据库Schema参考
+
+```json
+{
+  "story_schema": {
+    "properties": {
+      "title": {"type": "title"},
+      "status": {"type": "select", "options": ["待排期", "开发中", "测试中", "已发布"]},
+      "priority": {"type": "select", "options": ["P0", "P1", "P2", "P3"]},
+      "iteration_id": {"type": "relation", "database": "iteration"},
+      "progress": {"type": "number", "format": "percent"},
+      "planned_start": {"type": "date"},
+      "planned_end": {"type": "date"},
+      "task_count": {"type": "rollup", "relation": "tasks", "function": "count"}
+    }
+  },
+  "task_schema": {
+    "properties": {
+      "title": {"type": "title"},
+      "story_id": {"type": "relation", "database": "story"},
+      "iteration_id": {"type": "relation", "database": "iteration"},
+      "status": {"type": "select", "options": ["待办", "进行中", "已完成", "已验收"]},
+      "assignee": {"type": "people"},
+      "start_time": {"type": "date"},
+      "actual_end": {"type": "date"},
+      "token_cost": {"type": "number", "format": "number"},
+      "bug_count": {"type": "rollup", "relation": "bugs", "function": "count"}
+    }
+  },
+  "bug_schema": {
+    "properties": {
+      "title": {"type": "title"},
+      "task_id": {"type": "relation", "database": "task"},
+      "iteration_id": {"type": "relation", "database": "iteration"},
+      "status": {"type": "select", "options": ["新增", "修复中", "已修复", "已验证"]},
+      "severity": {"type": "select", "options": ["致命", "严重", "一般", "提示"]},
+      "reporter": {"type": "people"},
+      "created_at": {"type": "created_time"},
+      "resolved_at": {"type": "date"},
+      "fix_version": {"type": "rich_text"}
+    }
+  },
+  "iteration_schema": {
+    "properties": {
+      "name": {"type": "title"},
+      "start_date": {"type": "date"},
+      "end_date": {"type": "date"},
+      "status": {"type": "select", "options": ["规划中", "进行中", "已结束", "已归档"]}
+    }
+  },
+  "review_schema": {
+    "properties": {
+      "date": {"type": "title"},
+      "iteration_id": {"type": "relation", "database": "iteration"},
+      "completed_tasks": {"type": "number"},
+      "total_token_cost": {"type": "number"},
+      "new_bugs": {"type": "number"},
+      "fixed_bugs": {"type": "number"},
+      "summary": {"type": "rich_text"}
+    }
+  }
+}
+```
 
 ---
 
-> **文档版本**: v1.0  
-> **最后更新**: 2026-03-27  
-> **维护者**: 关联规则设计Agent
+## 7. 完成报告
+
+### 7.1 文件路径
+- **主文件**: `InfinityCompany/notion/relation_rules.md`
+
+### 7.2 定义的关联规则数量
+
+| 类别 | 数量 | 说明 |
+|:-----|:-----|:-----|
+| 实体关系 | 8个 | Story-Task、Task-Bug、Task-Iteration、Bug-Iteration、Story-Iteration、Bug-Review、Task-Review、Review-Iteration |
+| 关联类型 | 8种 | 包含、产生、归属(×3)、规划、追溯、汇总、关联 |
+
+### 7.3 状态流转规则数量
+
+| 实体 | 状态数 | 流转规则数 |
+|:-----|:-------|:-----------|
+| Task | 4个 | 6条 |
+| Bug | 4个 | 6条 |
+| Story | 4个 | 4条（自动流转） |
+
+### 7.4 触发器与动作数量
+
+| 触发器 | 动作数 |
+|:-------|:-------|
+| Bug创建时关联Task | 4个动作 |
+| Task完成时触发验收 | 4个动作 |
+| 复盘时汇总当日Task/Bug | 4个动作 |
+| 迭代结束时归档数据 | 4个动作 |
+
+### 7.5 数据一致性约束
+
+| 约束类型 | 数量 |
+|:---------|:-----|
+| 必填字段校验 | Task 8个 + Bug 8个 + Story 5个 = 21个 |
+| 状态转换矩阵 | 3个（Task/Bug/Story各1个） |
+| 关联完整性规则 | 5条 |
+
+### 7.6 交付清单
+
+- [x] Mermaid ER图（实体关系图）
+- [x] 关联关系明细表
+- [x] Task/Bug/Story状态流转图
+- [x] 状态转换矩阵表
+- [x] 4个触发器定义及伪代码
+- [x] 数据一致性约束定义
+- [x] Notion API集成参考（含API Key）
+- [x] Python代码示例（关系配置、Rollup、常用查询）
+- [x] 状态枚举定义（JSON格式）
+- [x] 字段类型映射表
+- [x] 数据库Schema参考
+
+---
+
+*文档版本: v1.0*  
+*最后更新: 2026-03-27*  
+*作者: 关联规则设计Agent*
