@@ -1,0 +1,5 @@
+configs/openclaw-target.local.env
+snapshots/*
+!snapshots/.gitkeep
+runtime/
+data/
