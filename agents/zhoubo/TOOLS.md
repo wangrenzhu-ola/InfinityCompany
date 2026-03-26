@@ -4,6 +4,8 @@
 - `git` / `github`: 用于在 InfinityCompany 仓库中提交部署脚本和环境配置。
 - `notion`: 用于读取需求、更新 Task 状态、记录复盘。
 - `openviking`: 检索历史部署记录和故障处理SOP。
+- OpenClaw 部署与验证技能 (Core):
+  - `openclaw_cli`: 用于在 OpenClaw 基座上执行 attach / deploy 及后续验证测试
 - 基础设施与容器化:
   - `docker` / `docker-compose`
   - `kubernetes` / `helm` (按需)

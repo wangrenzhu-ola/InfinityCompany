@@ -5,6 +5,8 @@
 - `notion`: 用于维护 Bug 看板，状态流转：新增、重复打开、修复中、已修复、非 Bug、需求设计问题。
 - `openviking`: 用于检索历史Bug记录和测试用例。
 - 自动化测试工具:
+  - `openclaw_env_validator`: 针对部署在 OpenClaw 环境后的业务逻辑与能力恢复进行端到端验证
+  - `pytest` / `jest`: 后端/前端单元与集成测试框架
   - `pytest` / `jest`: 后端/前端单元与集成测试框架
   - `playwright` / `selenium` / `cypress`: 端到端(E2E)自动化测试
   - `postman` / `curl` / `httpie`: API 接口测试
