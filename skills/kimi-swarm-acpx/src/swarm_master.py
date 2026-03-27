@@ -13,8 +13,12 @@ import uuid
 from typing import List, Dict, Optional, Callable, Any
 from dataclasses import dataclass, field
 
-from .dispatcher import ACPXDispatcher, AgentConfig, DispatchResult, DispatchMode
-from .result_store import OpenVikingStore, ResultStatus
+try:
+    from .dispatcher import ACPXDispatcher, AgentConfig, DispatchResult, DispatchMode
+    from .result_store import OpenVikingStore, ResultStatus
+except ImportError:
+    from dispatcher import ACPXDispatcher, AgentConfig, DispatchResult, DispatchMode
+    from result_store import OpenVikingStore, ResultStatus
 
 
 @dataclass
