@@ -8,17 +8,22 @@
 
 当前系统支持两种通讯方式：**`acpx` (实时双向沟通)** 和 **`emergency_inbox` (异步邮件投递)**。**原 `sessions_send` 机制已被完全废弃，禁止使用。**
 
-### 1. 实时沟通：`acpx` CLI (敲门唤醒与同步对话)
-当需要**即时反馈**、**紧急确认**或**多轮对话**时，必须使用 `acpx` CLI 工具。
+### 1. 实时沟通：`acpx-infinity` CLI (敲门唤醒与同步对话)
+当需要**即时反馈**、**紧急确认**或**多轮对话**时，必须使用 `acpx-infinity` CLI 工具。
 
 **调用示例：**
 ```bash
 # 唤醒并发送消息给曹参 (PMO)
-acpx caocan "曹参，请提供最新的进度报告"
+acpx-infinity caocan "曹参，请提供最新的进度报告"
 
-# 发送消息给刘邦 (主公)
-acpx liubang "主公，任务已完成，无异常。"
+# 发送消息给张良 (PM)
+acpx-infinity zhangliang "需求已更新，请查看"
+
+# 发送消息给韩信 (Dev)
+acpx-infinity hanxin "新任务已分配"
 ```
+
+**注意：** `acpx-infinity` 是 InfinityCompany 定制工具，支持所有虚拟公司 Agent ID。原生 `acpx` 仅支持系统预定义 agent，不支持我们的虚拟公司角色。
 
 ### 2. 异步沟通：`emergency_inbox` (邮件箱投递)
 当派发**非紧急的长期任务**、**大篇幅报告**，或者 `acpx` 暂时无法联系到目标时，使用异步邮箱投递。
