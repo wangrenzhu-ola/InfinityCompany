@@ -973,6 +973,77 @@ docker ps --filter "name=clawpanel" --format "table {{.Names}}\t{{.Status}}\t{{.
 
 ---
 
+### 3.9 跨角色共享发布回归用例
+
+#### TC-KM-001: 跨角色共享发布SOP存在性验证
+
+| 属性 | 内容 |
+|------|------|
+| **用例ID** | TC-KM-001 |
+| **用例名称** | 跨角色共享发布SOP文档存在性验证 |
+| **优先级** | P0 (阻塞级) |
+| **前置条件** | 仓库可读 |
+
+**测试步骤：**
+1. 检查 `governance/CROSS_ROLE_KNOWLEDGE_PUBLISH_SOP.md` 存在
+2. 验证文档包含“先入 Notion”“知识库管理员发布”“运行时隔离”三条规则
+
+**预期结果：**
+- 文件存在且规则完整
+
+**验证命令：**
+```bash
+./scripts/validate_cross_role_publish_gate.sh
+```
+
+---
+
+#### TC-KM-002: 共享发布模板完整性验证
+
+| 属性 | 内容 |
+|------|------|
+| **用例ID** | TC-KM-002 |
+| **用例名称** | 跨角色共享发布模板字段完整性验证 |
+| **优先级** | P0 (阻塞级) |
+| **前置条件** | TC-KM-001 通过 |
+
+**测试步骤：**
+1. 检查 `notion/cross_role_publish_template.md` 存在
+2. 验证模板包含来源角色、适用角色、发布者、发布状态、安全检查项
+
+**预期结果：**
+- 模板字段完整，可直接用于发布登记
+
+**验证命令：**
+```bash
+./scripts/validate_cross_role_publish_gate.sh
+```
+
+---
+
+#### TC-KM-003: 运行配置隔离作用域验证
+
+| 属性 | 内容 |
+|------|------|
+| **用例ID** | TC-KM-003 |
+| **用例名称** | OpenViking agent隔离作用域验证 |
+| **优先级** | P0 (阻塞级) |
+| **前置条件** | OpenClaw配置可读取 |
+
+**测试步骤：**
+1. 读取 `~/.openclaw/openclaw.json`
+2. 验证 `plugins.entries.openviking.config.targetUri` 为 `viking://agent/memories`
+
+**预期结果：**
+- 隔离作用域正确配置为 agent 级
+
+**验证命令：**
+```bash
+./scripts/validate_cross_role_publish_gate.sh
+```
+
+---
+
 ## 4. 测试执行流程
 
 ### 4.1 执行顺序

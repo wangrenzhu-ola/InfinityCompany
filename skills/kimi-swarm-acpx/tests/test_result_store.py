@@ -13,7 +13,7 @@ import sys
 # 添加 src 目录到路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from result_store import (
+from src.result_store import (
     OpenVikingStore, 
     SubAgentResult, 
     SwarmSession, 

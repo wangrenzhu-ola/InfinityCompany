@@ -13,7 +13,7 @@ import sys
 # 添加 src 目录到路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from swarm_master import (
+from src.swarm_master import (
     SwarmMaster, 
     SwarmConfig, 
     SubTask, 

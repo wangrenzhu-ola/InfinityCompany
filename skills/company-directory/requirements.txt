@@ -1,0 +1,4 @@
+# Company Directory Skill Dependencies
+# Python 3.8+ required
+
+PyYAML>=6.0

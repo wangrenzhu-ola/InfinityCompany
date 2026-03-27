@@ -90,7 +90,7 @@ class SwarmMaster:
         self,
         master_task: str,
         tasks: List[SubTask],
-        progress_callback: Optional[Callable[[str, DispatchResult]]] = None
+        progress_callback: Optional[Callable[[str, Any], None]] = None
     ) -> SwarmResult:
         """
         执行 Swarm 任务
