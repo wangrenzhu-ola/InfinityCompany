@@ -3,9 +3,51 @@
 ## 必备技能 (Skills)
 
 ### 代码开发与编辑
-- **VS Code / Cursor / Windsurf**: 主力代码编辑器，用于前后端代码开发、AI辅助编程
+- **Kimi Code CLI**: 编码执行器，用于生成/修改代码文件、创建脚本和项目（主要工具）
+- **VS Code / Cursor / Windsurf**: 辅助代码编辑器，用于代码审查和轻量编辑
 - **Git**: 版本控制，代码提交、分支管理、代码合并
 - **GitHub**: 代码托管、Pull Request、Code Review、Actions CI/CD
+
+### Kimi Code CLI 工作流程
+
+#### 架构分工
+- **会话模型**（我）：需求澄清、任务拆解、验收标准、结果核查、复盘总结
+- **Kimi CLI**：按指令在指定目录里创建/修改文件、生成脚本/项目、给出执行步骤
+
+#### 两种工作模式
+
+**1. 快速模式 (Quick Mode)**
+适用于明确的单次任务，执行完即返回。
+
+```bash
+# 必需参数：pty:true（分配伪终端，确保输出稳定）
+# 推荐 workdir 使用独立项目目录
+# timeout 建议：简单任务 300s，复杂项目 600s
+
+exec(command="kimi --print -p '任务描述'", pty=true, workdir="~/projects/my-project", timeout=300)
+```
+
+示例：
+```bash
+# 创建项目
+exec(command="kimi --print -p '创建一个 React + TypeScript 的待办事项应用'", pty=true, workdir="~/projects", timeout=600)
+
+# 重构代码
+exec(command="kimi --print -p '重构 src/utils.py 使用现代 Python 最佳实践'", pty=true, workdir="~/my-project", timeout=300)
+```
+
+**2. 交互模式 (Interactive Mode)**
+适用于复杂任务需要多轮交互，或 Kimi 可能会提问确认。
+
+```bash
+exec(command="kimi", pty=true, workdir="~/project", background=true)
+# 后续通过 process 工具控制
+```
+
+#### 注意事项
+- 优先使用 Quick Mode（`kimi --print`），避免进入交互模式导致输出不一致
+- 不要用 `kimi '...'` 作为 one-shot 标准写法
+- Kimi CLI 安装路径：`/Users/wangrenzhu/.local/bin/kimi`
 
 ### 编程语言
 - **Python**: 后端开发、AI/ML脚本、自动化工具
