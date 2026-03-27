@@ -3,3 +3,7 @@ snapshots/*
 !snapshots/.gitkeep
 runtime/
 data/
+__pycache__/
+*.pyc
+agents/*/.openclaw/
+.agent_profile_backup/
