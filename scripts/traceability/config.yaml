@@ -1,0 +1,146 @@
+# InfinityCompany 留痕校验配置
+
+# 校验级别设置
+check_levels:
+  git_commit:
+    enabled: true
+    fail_on_error: true
+    check_message_format: true
+    check_message_length: true
+    check_task_reference: true
+  
+  document:
+    enabled: true
+    fail_on_error: false
+    check_timestamps: true
+    check_template_compliance: true
+    check_version_association: true
+    stale_days_threshold: 90
+  
+  notion_board:
+    enabled: true
+    fail_on_error: false
+    check_required_fields: true
+    check_state_transitions: true
+    check_sla_compliance: true
+  
+  retrospective:
+    enabled: true
+    fail_on_error: false
+    check_daily_completion: true
+    check_task_bug_coverage: true
+    check_improvement_items: true
+    check_token_recording: true
+
+# Git 提交规范配置
+git:
+  # Conventional Commits 类型
+  valid_types:
+    - feat
+    - fix
+    - docs
+    - style
+    - refactor
+    - test
+    - chore
+    - design
+    - workflow
+    - agent
+  
+  # 角色映射（用于统计）
+  role_mapping:
+    hanxin: "研发工程师"
+    zhangliang: "产品经理"
+    xiaohe: "架构师"
+    zhoubo: "运维工程师"
+    lujia: "知识库管理员"
+    chenping: "测试工程师"
+    caocan: "PMO"
+    shusuntong: "设计师"
+    xiahouying: "私人助理"
+    lishiyi: "外部助理"
+  
+  # 提交频率基线（按角色）
+  commit_frequency_baseline:
+    hanxin: { min: 3, max: 8 }
+    zhangliang: { min: 1, max: 3 }
+    xiaohe: { min: 1, max: 2 }
+    zhoubo: { min: 1, max: 5 }
+    lujia: { min: 2, max: 4 }
+    chenping: { min: 1, max: 3 }
+
+# 文档检查配置
+documents:
+  # 关键文档路径模式
+  critical_patterns:
+    - "agents/*/IDENTITY.md"
+    - "workflows/*.md"
+    - "notion/*.md"
+    - "skills/**/README.md"
+    - "governance/*.md"
+    - "*.md"
+  
+  # 模板规则
+  template_rules:
+    "agents/*/IDENTITY.md":
+      required_frontmatter: ["name", "description"]
+      required_keywords: ["官方职位", "核心权责", "汇报关系"]
+    
+    "workflows/*.md":
+      required_sections: ["流程概述", "执行步骤"]
+      required_keywords: ["负责人", "输入", "输出", "验收标准"]
+    
+    "notion/*.md":
+      required_sections: ["字段定义"]
+
+# Notion 配置
+notion:
+  # 数据库 ID（从环境变量读取，此处仅作配置说明）
+  databases:
+    external_req: "${NOTION_EXTERNAL_REQ_DB_ID}"
+    story: "${NOTION_STORY_DB_ID}"
+    task: "${NOTION_TASK_DB_ID}"
+    bug: "${NOTION_BUG_DB_ID}"
+    iteration: "${NOTION_ITERATION_DB_ID}"
+    retro: "${NOTION_RETROSPECTIVE_DB_ID}"
+  
+  # SLA 配置（小时）
+  sla:
+    external_req:
+      待评估: 24
+      已评估: 48
+      已采纳: 4
+    
+    bug:
+      致命: 4
+      严重: 24
+      一般: 168  # 1周
+
+# 复盘配置
+retrospective:
+  # 复盘时间配置
+  expected_time: "18:00"  # 预期复盘时间
+  deadline_time: "23:59"  # 复盘截止当日时间
+  
+  # 改进项配置
+  improvement_item:
+    default_deadline_days: 7  # 默认截止日期（从复盘日起）
+    reminder_days_before: 2   # 提前提醒天数
+
+# 报告配置
+report:
+  output_dir: "./reports"
+  formats: ["markdown", "json"]
+  retention_days: 90
+  
+  # 通知配置
+  notifications:
+    slack_webhook: "${SLACK_WEBHOOK_URL}"
+    email_recipients: []
+
+# 日志配置
+logging:
+  level: INFO  # DEBUG, INFO, WARNING, ERROR
+  file: "./logs/traceability.log"
+  max_size_mb: 10
+  backup_count: 5
