@@ -171,7 +171,7 @@ class SwarmMaster:
         self,
         master_task: str,
         tasks: List[SubTask],
-        progress_callback: Optional[Callable[[str, DispatchResult]]] = None
+        progress_callback: Optional[Callable[[str, DispatchResult], Any]] = None
     ) -> SwarmResult:
         """并行执行（快捷方法）"""
         original_mode = self.config.parallel
@@ -191,7 +191,7 @@ class SwarmMaster:
         self,
         master_task: str,
         tasks: List[SubTask],
-        progress_callback: Optional[Callable[[str, DispatchResult]]] = None
+        progress_callback: Optional[Callable[[str, DispatchResult], Any]] = None
     ) -> SwarmResult:
         """顺序执行（快捷方法）"""
         original_mode = self.config.parallel
