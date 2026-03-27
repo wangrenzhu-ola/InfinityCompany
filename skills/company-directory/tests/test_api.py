@@ -4,11 +4,12 @@ Company Directory API 测试
 
 import sys
 import os
+import tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import unittest
+from unittest.mock import patch
 from src.api import CompanyDirectoryAPI
-from src.models import AgentRole
 
 
 class TestCompanyDirectoryAPI(unittest.TestCase):
@@ -89,6 +90,13 @@ class TestCommunicationService(unittest.TestCase):
     def setUp(self):
         """测试前置"""
         self.api = CompanyDirectoryAPI()
+        self.temp_file = tempfile.NamedTemporaryFile(delete=False)
+        self.temp_file.close()
+        self.api.comm_service.acpx_store_path = self.temp_file.name
+
+    def tearDown(self):
+        if os.path.exists(self.temp_file.name):
+            os.remove(self.temp_file.name)
     
     def test_send_email_invalid_agent(self):
         """测试发送邮件到无效成员"""
@@ -106,6 +114,108 @@ class TestCommunicationService(unittest.TestCase):
         self.assertIn("acpx", cmd)
         self.assertIn("caocan", cmd)
         self.assertIn("测试消息", cmd)
+
+    @patch("src.services.CommunicationService._execute_openclaw_agent")
+    def test_send_acpx_message_with_receipt(self, mock_exec):
+        mock_exec.side_effect = [
+            {"status": "success", "response": "ONLINE_ACK"},
+            {"status": "success", "response": "ACK 11111111-1111-1111-1111-111111111111"},
+        ]
+        with patch("src.services.uuid.uuid4", return_value="11111111-1111-1111-1111-111111111111"):
+            result = self.api.send_acpx_message(
+                target_id="hanxin",
+                message="测试回执",
+                sender_id="caocan",
+                auto_ack=True
+            )
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["delivery_status"], "read")
+
+    @patch("src.services.CommunicationService._execute_openclaw_agent")
+    def test_broadcast_and_history(self, mock_exec):
+        mock_exec.side_effect = [
+            {"status": "success", "response": "ONLINE_ACK"},
+            {"status": "success", "response": "ACK ok"},
+            {"status": "success", "response": "ONLINE_ACK"},
+            {"status": "error", "error": "timeout"},
+        ]
+        result = self.api.send_broadcast(
+            selector="ids:hanxin,caocan",
+            message="全员通知",
+            sender_id="system",
+            auto_ack=False
+        )
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["total"], 2)
+        history = self.api.query_message_history(limit=10)
+        self.assertEqual(len(history), 2)
+
+    @patch("src.services.CommunicationService._execute_openclaw_agent")
+    def test_presence_status_busy(self, mock_exec):
+        mock_exec.return_value = {"status": "error", "error": "session file locked (timeout 10000ms)"}
+        result = self.api.check_presence("chenping")
+        self.assertEqual(result["status"], "busy")
+
+    @patch("src.services.CommunicationService._execute_openclaw_agent")
+    def test_send_acpx_message_retry_success(self, mock_exec):
+        mock_exec.side_effect = [
+            {"status": "success", "response": "ONLINE_ACK"},
+            {"status": "error", "error": "timeout"},
+            {"status": "success", "response": "收到"},
+        ]
+        result = self.api.send_acpx_message(
+            target_id="hanxin",
+            message="重试消息",
+            retries=1,
+            auto_ack=False
+        )
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["delivery_status"], "delivered")
+        self.assertEqual(result["attempts"], 2)
+
+    @patch("src.services.CommunicationService._execute_openclaw_agent")
+    @patch("src.services.CommunicationService.send_email")
+    def test_send_acpx_message_fallback_email(self, mock_send_email, mock_exec):
+        mock_exec.side_effect = [
+            {"status": "success", "response": "ONLINE_ACK"},
+            {"status": "error", "error": "timeout"},
+            {"status": "error", "error": "timeout"},
+        ]
+        mock_send_email.return_value = {
+            "status": "success",
+            "file_path": "/tmp/fallback.md"
+        }
+        result = self.api.send_acpx_message(
+            target_id="hanxin",
+            message="降级消息",
+            retries=1,
+            fallback_to_email=True,
+            auto_ack=False
+        )
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["delivery_status"], "fallback_email")
+        self.assertTrue(result["fallback_email_result"]["status"] == "success")
+
+    @patch("src.services.CommunicationService._execute_openclaw_agent")
+    def test_broadcast_retry_failed_targets(self, mock_exec):
+        mock_exec.side_effect = [
+            {"status": "success", "response": "ONLINE_ACK"},
+            {"status": "success", "response": "收到"},
+            {"status": "success", "response": "ONLINE_ACK"},
+            {"status": "error", "error": "timeout"},
+            {"status": "success", "response": "ONLINE_ACK"},
+            {"status": "success", "response": "收到"},
+        ]
+        result = self.api.send_broadcast(
+            selector="ids:hanxin,caocan",
+            message="广播重试",
+            auto_ack=False,
+            retry_failed_targets=True,
+            retry_rounds=1
+        )
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["total"], 2)
+        self.assertEqual(result["failed"], 0)
 
 
 if __name__ == "__main__":

@@ -11,6 +11,13 @@
 ### 1. 实时沟通：`acpx-infinity` CLI (敲门唤醒与同步对话)
 当需要**即时反馈**、**紧急确认**或**多轮对话**时，必须使用 `acpx-infinity` CLI 工具。
 
+`acpx-infinity` 当前支持增强能力：
+- 发送后返回目标在线状态（`online/offline/busy/unknown`）
+- 发送后返回送达状态（`delivered/read/failed`）
+- 自动回执提示（消息自动附带 ACK 指令）
+- 群发广播（`all` / `role:<role>` / `ids:id1,id2`）
+- 消息持久化与历史追溯（jsonl 日志）
+
 **调用示例：**
 ```bash
 # 唤醒并发送消息给曹参 (PMO)
@@ -21,6 +28,21 @@ acpx-infinity zhangliang "需求已更新，请查看"
 
 # 发送消息给韩信 (Dev)
 acpx-infinity hanxin "新任务已分配"
+
+# 广播通知全员
+acpx-infinity broadcast --targets all --message "19:00 复盘会准时开始"
+
+# 广播失败目标重试（仅重试 failed）
+acpx-infinity broadcast --targets all --message "通知全员" --retry-failed --retry-rounds 2
+
+# 单发重试并在失败后降级到邮箱
+acpx-infinity hanxin "紧急任务请处理" --retries 2 --fallback-email
+
+# 查询目标在线状态
+acpx-infinity status chenping
+
+# 查询历史
+acpx-infinity history --limit 20
 ```
 
 **注意：** `acpx-infinity` 是 InfinityCompany 定制工具，支持所有虚拟公司 Agent ID。原生 `acpx` 仅支持系统预定义 agent，不支持我们的虚拟公司角色。

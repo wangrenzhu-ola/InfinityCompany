@@ -3,7 +3,11 @@
 """
 
 import os
+import re
+import json
 import uuid
+import subprocess
+from pathlib import Path
 from typing import List, Optional, Dict
 from datetime import datetime
 from .models import Agent, AgentRole, OrganizationUnit, Email
@@ -95,6 +99,7 @@ class CommunicationService:
     def __init__(self, storage: Storage, inbox_base_path: str = None):
         self.storage = storage
         self.inbox_base_path = inbox_base_path or "~/.openclaw/workspace/emergency_inbox"
+        self.acpx_store_path = os.path.expanduser("~/.openclaw/workspace/company-directory/messages/acpx_messages.jsonl")
     
     def send_email(self, target_id: str, subject: str, message: str, 
                    sender_id: str = "system", urgency: str = "normal",
@@ -209,6 +214,233 @@ class CommunicationService:
         # 转义消息中的特殊字符
         escaped_message = message.replace('"', '\\"')
         return f"acpx {target_id} \"{escaped_message}\""
+
+    def check_agent_presence(self, agent_id: str, timeout_seconds: int = 20) -> Dict:
+        target = self.storage.get_agent(agent_id)
+        if not target:
+            return {
+                "status": "unknown",
+                "message": f"未知的 Agent ID: {agent_id}"
+            }
+
+        probe_message = "状态探测: 仅回复 ONLINE_ACK"
+        result = self._execute_openclaw_agent(agent_id, probe_message, timeout_seconds)
+        if result["status"] == "success":
+            return {
+                "status": "online",
+                "message": f"{target.name} 在线并可响应",
+                "response_preview": result.get("response", "")[:120],
+            }
+        if "session file locked" in result.get("error", ""):
+            return {
+                "status": "busy",
+                "message": f"{target.name} 当前会话被锁定",
+                "error": result.get("error", "")
+            }
+        return {
+            "status": "offline",
+            "message": f"{target.name} 未在探测时响应",
+            "error": result.get("error", "")
+        }
+
+    def send_acpx_message(self, target_id: str, message: str, sender_id: str = "system",
+                          timeout_seconds: int = 120, auto_ack: bool = True,
+                          probe_timeout_seconds: int = 20, broadcast_id: Optional[str] = None,
+                          retries: int = 0, fallback_to_email: bool = False,
+                          fallback_email_urgency: str = "urgent") -> Dict:
+        target = self.storage.get_agent(target_id)
+        if not target:
+            return {
+                "status": "error",
+                "message": f"未知的 Agent ID: {target_id}",
+                "valid_agents": [a.agent_id for a in self.storage.list_all_agents()]
+            }
+
+        sender = self.storage.get_agent(sender_id)
+        sender_name = sender.name if sender else (sender_id if sender_id != "system" else "系统")
+        message_id = str(uuid.uuid4())
+        presence = self.check_agent_presence(target_id, timeout_seconds=probe_timeout_seconds)
+
+        payload = message
+        if auto_ack:
+            payload = (
+                f"[MSG_ID:{message_id}][FROM:{sender_id}] {message}\n"
+                f"请按格式回执: ACK {message_id}"
+            )
+
+        attempts = max(retries, 0) + 1
+        result = {"status": "error", "error": "未执行"}
+        response_text = ""
+        errors: List[str] = []
+        for _ in range(attempts):
+            result = self._execute_openclaw_agent(target_id, payload, timeout_seconds)
+            response_text = result.get("response", "")
+            if result["status"] == "success":
+                break
+            err = result.get("error")
+            if err:
+                errors.append(err)
+
+        receipt_status = "failed"
+        if result["status"] == "success":
+            receipt_status = "delivered"
+            if self._contains_ack(response_text, message_id):
+                receipt_status = "read"
+
+        fallback_email_result: Optional[Dict] = None
+        if result["status"] != "success" and fallback_to_email:
+            email_subject = f"[acpx降级投递] 来自 {sender_name} 的消息"
+            email_body = (
+                f"原实时消息发送失败，已降级为邮箱投递。\n\n"
+                f"- 发送方: {sender_name} ({sender_id})\n"
+                f"- 目标方: {target.name} ({target_id})\n"
+                f"- 原消息ID: {message_id}\n"
+                f"- 原消息内容:\n{message}\n\n"
+                f"- 失败原因摘要:\n{(errors[-1] if errors else result.get('error', 'unknown'))}\n"
+            )
+            fallback_email_result = self.send_email(
+                target_id=target_id,
+                subject=email_subject,
+                message=email_body,
+                sender_id=sender_id,
+                urgency=fallback_email_urgency,
+                msg_type="action_required",
+                reply_to=message_id
+            )
+            if fallback_email_result.get("status") == "success":
+                receipt_status = "fallback_email"
+
+        record = {
+            "message_id": message_id,
+            "broadcast_id": broadcast_id,
+            "sender_id": sender_id,
+            "sender_name": sender_name,
+            "target_id": target_id,
+            "target_name": target.name,
+            "message": message,
+            "payload": payload,
+            "timestamp": datetime.now().isoformat(),
+            "target_status": presence.get("status"),
+            "delivery_status": receipt_status,
+            "attempts": attempts,
+            "auto_ack": auto_ack,
+            "response": response_text,
+            "error": result.get("error"),
+            "errors": errors,
+            "fallback_email_result": fallback_email_result,
+        }
+        self._append_message_record(record)
+
+        return {
+            "status": "success" if result["status"] == "success" or receipt_status == "fallback_email" else "error",
+            "message_id": message_id,
+            "target_id": target_id,
+            "target_name": target.name,
+            "target_status": presence.get("status"),
+            "delivery_status": receipt_status,
+            "attempts": attempts,
+            "response": response_text,
+            "error": result.get("error"),
+            "errors": errors,
+            "fallback_email_result": fallback_email_result,
+        }
+
+    def send_broadcast(self, selector: str, message: str, sender_id: str = "system",
+                       timeout_seconds: int = 120, auto_ack: bool = True,
+                       probe_timeout_seconds: int = 20, retries: int = 0,
+                       retry_failed_targets: bool = False, retry_rounds: int = 1,
+                       fallback_to_email: bool = False,
+                       fallback_email_urgency: str = "urgent") -> Dict:
+        target_ids = self._resolve_targets(selector)
+        if not target_ids:
+            return {
+                "status": "error",
+                "message": f"未匹配到目标: {selector}"
+            }
+
+        broadcast_id = str(uuid.uuid4())
+        latest_by_target: Dict[str, Dict] = {}
+        for target_id in target_ids:
+            send_result = self.send_acpx_message(
+                target_id=target_id,
+                message=message,
+                sender_id=sender_id,
+                timeout_seconds=timeout_seconds,
+                auto_ack=auto_ack,
+                probe_timeout_seconds=probe_timeout_seconds,
+                broadcast_id=broadcast_id,
+                retries=retries,
+                fallback_to_email=fallback_to_email,
+                fallback_email_urgency=fallback_email_urgency
+            )
+            latest_by_target[target_id] = send_result
+
+        if retry_failed_targets and retry_rounds > 0:
+            for _ in range(retry_rounds):
+                failed_targets = [
+                    tid for tid, result in latest_by_target.items()
+                    if result.get("delivery_status") == "failed"
+                ]
+                if not failed_targets:
+                    break
+                for target_id in failed_targets:
+                    retry_result = self.send_acpx_message(
+                        target_id=target_id,
+                        message=message,
+                        sender_id=sender_id,
+                        timeout_seconds=timeout_seconds,
+                        auto_ack=auto_ack,
+                        probe_timeout_seconds=probe_timeout_seconds,
+                        broadcast_id=broadcast_id,
+                        retries=retries,
+                        fallback_to_email=fallback_to_email,
+                        fallback_email_urgency=fallback_email_urgency
+                    )
+                    latest_by_target[target_id] = retry_result
+
+        results = [latest_by_target[tid] for tid in target_ids]
+
+        delivered_count = len([r for r in results if r.get("delivery_status") in {"delivered", "read", "fallback_email"}])
+        read_count = len([r for r in results if r.get("delivery_status") == "read"])
+        failed_count = len(results) - delivered_count
+
+        return {
+            "status": "success",
+            "broadcast_id": broadcast_id,
+            "selector": selector,
+            "total": len(results),
+            "delivered": delivered_count,
+            "read": read_count,
+            "failed": failed_count,
+            "results": results,
+        }
+
+    def query_message_history(self, limit: int = 50, sender_id: Optional[str] = None,
+                              target_id: Optional[str] = None, broadcast_id: Optional[str] = None) -> List[Dict]:
+        path = Path(self.acpx_store_path)
+        if not path.exists():
+            return []
+
+        records: List[Dict] = []
+        with path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if sender_id and record.get("sender_id") != sender_id:
+                    continue
+                if target_id and record.get("target_id") != target_id:
+                    continue
+                if broadcast_id and record.get("broadcast_id") != broadcast_id:
+                    continue
+                records.append(record)
+
+        records.sort(key=lambda r: r.get("timestamp", ""), reverse=True)
+        return records[:max(limit, 1)]
     
     def get_contact_info(self, agent_id: str) -> Optional[Dict]:
         """
@@ -232,3 +464,101 @@ class CommunicationService:
             "inbox_path": f"~/.openclaw/workspace/emergency_inbox/{agent.agent_id}",
             "email": agent.email or f"{agent.agent_id}@infinity.company",
         }
+
+    def _execute_openclaw_agent(self, agent_id: str, message: str, timeout_seconds: int) -> Dict:
+        cmd = [
+            "openclaw", "agent",
+            "--agent", agent_id,
+            "--timeout", str(timeout_seconds),
+            "--message", message
+        ]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_seconds + 15)
+        except subprocess.TimeoutExpired:
+            return {
+                "status": "error",
+                "error": f"命令执行超时（>{timeout_seconds}s）"
+            }
+        except Exception as exc:
+            return {
+                "status": "error",
+                "error": str(exc)
+            }
+
+        stdout = self._sanitize_agent_output(proc.stdout or "")
+        stderr = (proc.stderr or "").strip()
+        combined_error = stderr
+        if proc.returncode != 0 and stdout:
+            combined_error = f"{stderr}\n{stdout}".strip()
+        if "Error:" in stdout and proc.returncode == 0:
+            combined_error = stdout
+        if proc.returncode != 0 or combined_error:
+            return {
+                "status": "error",
+                "response": stdout,
+                "error": combined_error or f"命令返回码 {proc.returncode}",
+            }
+        return {
+            "status": "success",
+            "response": stdout,
+        }
+
+    def _sanitize_agent_output(self, raw: str) -> str:
+        lines = []
+        for line in raw.splitlines():
+            striped = line.strip()
+            if not striped:
+                continue
+            if "[plugins]" in striped:
+                continue
+            if striped.startswith("🦞 OpenClaw"):
+                continue
+            if striped.startswith("│") or striped.startswith("◇"):
+                continue
+            if striped.startswith("Gateway target:") or striped.startswith("Source:") or striped.startswith("Config:"):
+                continue
+            lines.append(line)
+        return "\n".join(lines).strip()
+
+    def _contains_ack(self, response: str, message_id: str) -> bool:
+        if not response:
+            return False
+        patterns = [
+            rf"\bACK\s+{re.escape(message_id)}\b",
+            rf"\b已收到\b.*{re.escape(message_id[:8])}",
+            rf"\b收到\b.*{re.escape(message_id[:8])}",
+        ]
+        return any(re.search(p, response, flags=re.IGNORECASE) for p in patterns)
+
+    def _resolve_targets(self, selector: str) -> List[str]:
+        if selector == "all":
+            return [a.agent_id for a in self.storage.list_all_agents()]
+
+        if selector.startswith("role:"):
+            role_name = selector.split(":", 1)[1].strip()
+            if not role_name:
+                return []
+            try:
+                role = AgentRole(role_name)
+            except ValueError:
+                return []
+            return [a.agent_id for a in self.storage.find_agents_by_role(role)]
+
+        if selector.startswith("ids:"):
+            raw_ids = selector.split(":", 1)[1]
+            parsed = [x.strip() for x in raw_ids.split(",") if x.strip()]
+            valid = []
+            for aid in parsed:
+                if self.storage.get_agent(aid):
+                    valid.append(aid)
+            return valid
+
+        if self.storage.get_agent(selector):
+            return [selector]
+        return []
+
+    def _append_message_record(self, record: Dict) -> None:
+        path = Path(self.acpx_store_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")

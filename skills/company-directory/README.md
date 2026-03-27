@@ -7,6 +7,9 @@ InfinityCompany 公司成员目录与通讯管理 Skill。
 - 👥 **成员查询**: 查询公司所有成员信息、职责、技能
 - 🏢 **组织架构**: 展示团队层级结构和汇报关系
 - 📨 **通讯管理**: 支持 acpx 实时通讯和 emergency\_inbox 异步邮件
+- 📬 **回执机制**: 实时返回在线状态、送达状态、自动回执结果
+- 📢 **群发广播**: 支持全员广播、按角色广播、按ID集合广播
+- 🧾 **消息追溯**: 持久化消息日志并支持历史查询
 - 🚨 **升级路径**: 查询技术故障、需求变更等事件的升级路径
 - 🔍 **技能搜索**: 按技能标签搜索成员
 
@@ -48,6 +51,27 @@ python cli.py email -t caocan -s "进度汇报" -m "任务已完成"
 
 # 生成 acpx 命令
 python cli.py acpx hanxin "请检查这个问题"
+
+# acpx-infinity: 单发（含在线探测 + 送达回执）
+python cli.py acpx-send hanxin "请确认部署状态" --from caocan
+
+# 单发失败自动重试2次，仍失败则降级投递邮箱
+python cli.py acpx-send hanxin "紧急任务请处理" --from caocan --retries 2 --fallback-email
+
+# acpx-infinity: 群发（全员广播）
+python cli.py acpx-broadcast --targets all --message "19:00 复盘会准时开始" --from caocan
+
+# 群发失败仅重试failed目标，最多2轮
+python cli.py acpx-broadcast --targets all --message "通知全员" --retry-failed --retry-rounds 2
+
+# acpx-infinity: 群发（按角色）
+python cli.py acpx-broadcast --targets role:qa --message "请更新回归报告" --from caocan
+
+# 查询在线状态
+python cli.py acpx-status chenping
+
+# 查询消息历史
+python cli.py acpx-history --limit 20
 
 # 查看汇报链
 python cli.py chain hanxin
@@ -112,6 +136,26 @@ escalation = api.get_escalation_path("incident")
 acpx <agent_id> "消息内容"
 ```
 
+### 实时通讯增强 (acpx-infinity)
+
+```bash
+# 兼容旧用法
+./acpx-infinity zhangliang "需求评审请确认"
+
+# 广播
+./acpx-infinity broadcast --targets all --message "通知全员"
+
+# 在线状态
+./acpx-infinity status hanxin
+
+# 历史记录
+./acpx-infinity history --limit 10
+```
+
+消息持久化文件默认写入：
+
+`~/.openclaw/workspace/company-directory/messages/acpx_messages.jsonl`
+
 ### 异步邮件 (emergency\_inbox)
 
 邮件将投递到 `~/.openclaw/workspace/emergency_inbox/<agent_id>/` 目录下。
@@ -158,4 +202,3 @@ python cli.py email -t lujia -s "文档整理" -m "有空时整理一下文档" 
 - `agents.yaml` - 成员基础信息
 - `organization.yaml` - 组织架构
 - `protocols.yaml` - 通讯协议配置
-

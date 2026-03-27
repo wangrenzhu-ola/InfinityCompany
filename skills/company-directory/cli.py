@@ -115,6 +115,50 @@ def main():
     acpx_parser = subparsers.add_parser('acpx', help='生成 acpx 命令')
     acpx_parser.add_argument('target_id', help='目标 Agent ID')
     acpx_parser.add_argument('message', help='消息内容')
+
+    # --- acpx-send 命令组 ---
+    acpx_send_parser = subparsers.add_parser('acpx-send', help='发送 acpx-infinity 消息并返回回执')
+    acpx_send_parser.add_argument('target_id', help='目标 Agent ID')
+    acpx_send_parser.add_argument('message', help='消息内容')
+    acpx_send_parser.add_argument('--from', '-f', dest='sender', default='system', help='发送方 Agent ID')
+    acpx_send_parser.add_argument('--timeout', type=int, default=120, help='消息发送超时秒数')
+    acpx_send_parser.add_argument('--probe-timeout', type=int, default=20, help='在线探测超时秒数')
+    acpx_send_parser.add_argument('--retries', type=int, default=0, help='失败重试次数')
+    acpx_send_parser.add_argument('--fallback-email', action='store_true', help='多次失败后降级投递到邮箱')
+    acpx_send_parser.add_argument('--fallback-email-urgency', choices=['urgent', 'normal', 'low'],
+                                  default='urgent', help='降级邮件紧急程度')
+    acpx_send_parser.add_argument('--no-auto-ack', action='store_true', help='关闭自动回执提示')
+    acpx_send_parser.add_argument('--json', '-j', action='store_true', help='JSON 输出')
+
+    # --- acpx-broadcast 命令组 ---
+    acpx_broadcast_parser = subparsers.add_parser('acpx-broadcast', help='群发广播消息')
+    acpx_broadcast_parser.add_argument('--targets', '-t', required=True, help='目标选择器: all | role:<role> | ids:id1,id2')
+    acpx_broadcast_parser.add_argument('--message', '-m', required=True, help='广播消息内容')
+    acpx_broadcast_parser.add_argument('--from', '-f', dest='sender', default='system', help='发送方 Agent ID')
+    acpx_broadcast_parser.add_argument('--timeout', type=int, default=120, help='每个目标发送超时秒数')
+    acpx_broadcast_parser.add_argument('--probe-timeout', type=int, default=20, help='在线探测超时秒数')
+    acpx_broadcast_parser.add_argument('--retries', type=int, default=0, help='单个目标失败重试次数')
+    acpx_broadcast_parser.add_argument('--retry-failed', action='store_true', help='只重试失败目标')
+    acpx_broadcast_parser.add_argument('--retry-rounds', type=int, default=1, help='失败目标重试轮次')
+    acpx_broadcast_parser.add_argument('--fallback-email', action='store_true', help='多次失败后降级投递到邮箱')
+    acpx_broadcast_parser.add_argument('--fallback-email-urgency', choices=['urgent', 'normal', 'low'],
+                                       default='urgent', help='降级邮件紧急程度')
+    acpx_broadcast_parser.add_argument('--no-auto-ack', action='store_true', help='关闭自动回执提示')
+    acpx_broadcast_parser.add_argument('--json', '-j', action='store_true', help='JSON 输出')
+
+    # --- acpx-history 命令组 ---
+    acpx_history_parser = subparsers.add_parser('acpx-history', help='查询 acpx-infinity 历史消息')
+    acpx_history_parser.add_argument('--limit', '-n', type=int, default=20, help='返回条数')
+    acpx_history_parser.add_argument('--sender', help='按发送方筛选')
+    acpx_history_parser.add_argument('--target', help='按接收方筛选')
+    acpx_history_parser.add_argument('--broadcast-id', help='按广播ID筛选')
+    acpx_history_parser.add_argument('--json', '-j', action='store_true', help='JSON 输出')
+
+    # --- acpx-status 命令组 ---
+    acpx_status_parser = subparsers.add_parser('acpx-status', help='查询目标在线状态')
+    acpx_status_parser.add_argument('agent_id', help='目标 Agent ID')
+    acpx_status_parser.add_argument('--timeout', type=int, default=20, help='探测超时秒数')
+    acpx_status_parser.add_argument('--json', '-j', action='store_true', help='JSON 输出')
     
     # --- chain 命令组 ---
     chain_parser = subparsers.add_parser('chain', help='查看汇报链')
@@ -250,6 +294,95 @@ def main():
         cmd = api.get_acpx_command(args.target_id, args.message)
         print(f"\n生成的命令:\n")
         print(f"  {cmd}\n")
+
+    elif args.command == 'acpx-send':
+        result = api.send_acpx_message(
+            target_id=args.target_id,
+            message=args.message,
+            sender_id=args.sender,
+            timeout_seconds=args.timeout,
+            auto_ack=not args.no_auto_ack,
+            probe_timeout_seconds=args.probe_timeout,
+            retries=args.retries,
+            fallback_to_email=args.fallback_email,
+            fallback_email_urgency=args.fallback_email_urgency
+        )
+        if args.json:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            if result["status"] == "success":
+                print(f"\n✅ 已发送给 {result.get('target_name', args.target_id)} ({result.get('target_id', args.target_id)})")
+                print(f"   消息ID: {result.get('message_id')}")
+                print(f"   对方状态: {result.get('target_status')}")
+                print(f"   送达状态: {result.get('delivery_status')}")
+                if result.get("response"):
+                    print(f"   对方回复: {result.get('response')[:200]}\n")
+                else:
+                    print()
+            else:
+                print(f"\n❌ 发送失败: {result.get('error') or result.get('message')}\n")
+                sys.exit(1)
+
+    elif args.command == 'acpx-broadcast':
+        result = api.send_broadcast(
+            selector=args.targets,
+            message=args.message,
+            sender_id=args.sender,
+            timeout_seconds=args.timeout,
+            auto_ack=not args.no_auto_ack,
+            probe_timeout_seconds=args.probe_timeout,
+            retries=args.retries,
+            retry_failed_targets=args.retry_failed,
+            retry_rounds=args.retry_rounds,
+            fallback_to_email=args.fallback_email,
+            fallback_email_urgency=args.fallback_email_urgency
+        )
+        if args.json:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            if result["status"] != "success":
+                print(f"\n❌ 群发失败: {result.get('message')}\n")
+                sys.exit(1)
+            print(f"\n✅ 群发完成")
+            print(f"   广播ID: {result.get('broadcast_id')}")
+            print(f"   选择器: {result.get('selector')}")
+            print(f"   总数: {result.get('total')}")
+            print(f"   已送达: {result.get('delivered')}")
+            print(f"   已读: {result.get('read')}")
+            print(f"   失败: {result.get('failed')}\n")
+
+    elif args.command == 'acpx-history':
+        records = api.query_message_history(
+            limit=args.limit,
+            sender_id=args.sender,
+            target_id=args.target,
+            broadcast_id=args.broadcast_id
+        )
+        if args.json:
+            print(json.dumps(records, ensure_ascii=False, indent=2))
+        else:
+            if not records:
+                print("\n暂无历史消息\n")
+            else:
+                print(f"\n最近 {len(records)} 条消息:\n")
+                for rec in records:
+                    print(
+                        f"- {rec.get('timestamp')} | {rec.get('sender_id')} -> {rec.get('target_id')} "
+                        f"| {rec.get('delivery_status')} | {rec.get('message_id')[:8]}"
+                    )
+                print()
+
+    elif args.command == 'acpx-status':
+        result = api.check_presence(args.agent_id, timeout_seconds=args.timeout)
+        if args.json:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            print(f"\n目标: {args.agent_id}")
+            print(f"状态: {result.get('status')}")
+            print(f"说明: {result.get('message')}")
+            if result.get("response_preview"):
+                print(f"响应预览: {result.get('response_preview')}")
+            print()
     
     # 处理 inbox 命令
     elif args.command == 'inbox':

@@ -1,17 +1,43 @@
 #!/bin/bash
-# InfinityCompany 跨Agent通信工具
-# 替代原生acpx，支持虚拟公司agent ID
+set -euo pipefail
 
-set -e
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CLI="$SCRIPT_DIR/cli.py"
 
-AGENT_ID=$1
-MESSAGE=$2
+usage() {
+  echo "Usage:"
+  echo "  acpx-infinity <agent_id> <message>"
+  echo "  acpx-infinity broadcast --targets <all|role:<role>|ids:a,b> --message <content>"
+  echo "  acpx-infinity status <agent_id>"
+  echo "  acpx-infinity history [--limit N] [--sender id] [--target id]"
+}
 
-if [ -z "$AGENT_ID" ] || [ -z "$MESSAGE" ]; then
-    echo "Usage: acpx-infinity <agent_id> <message>"
-    echo "Example: acpx-infinity zhangliang '你好，我是韩信'"
-    exit 1
+if [ $# -lt 1 ]; then
+  usage
+  exit 1
 fi
 
-# 使用openclaw agent命令实现跨Agent通信
-openclaw agent --agent "$AGENT_ID" --message "$MESSAGE" 2>/dev/null | grep -v "\[plugins\]" | tail -50
+case "$1" in
+  broadcast)
+    shift
+    python3 "$CLI" acpx-broadcast "$@"
+    ;;
+  status)
+    shift
+    python3 "$CLI" acpx-status "$@"
+    ;;
+  history)
+    shift
+    python3 "$CLI" acpx-history "$@"
+    ;;
+  *)
+    if [ $# -lt 2 ]; then
+      usage
+      exit 1
+    fi
+    target_id="$1"
+    message="$2"
+    shift 2
+    python3 "$CLI" acpx-send "$target_id" "$message" "$@"
+    ;;
+esac

@@ -180,6 +180,55 @@ class CompanyDirectoryAPI:
             可执行的 acpx 命令字符串
         """
         return self.comm_service.get_acpx_command(target_id, message)
+
+    def check_presence(self, agent_id: str, timeout_seconds: int = 20) -> Dict:
+        return self.comm_service.check_agent_presence(agent_id, timeout_seconds=timeout_seconds)
+
+    def send_acpx_message(self, target_id: str, message: str, sender_id: str = "system",
+                          timeout_seconds: int = 120, auto_ack: bool = True,
+                          probe_timeout_seconds: int = 20, retries: int = 0,
+                          fallback_to_email: bool = False,
+                          fallback_email_urgency: str = "urgent") -> Dict:
+        return self.comm_service.send_acpx_message(
+            target_id=target_id,
+            message=message,
+            sender_id=sender_id,
+            timeout_seconds=timeout_seconds,
+            auto_ack=auto_ack,
+            probe_timeout_seconds=probe_timeout_seconds,
+            retries=retries,
+            fallback_to_email=fallback_to_email,
+            fallback_email_urgency=fallback_email_urgency
+        )
+
+    def send_broadcast(self, selector: str, message: str, sender_id: str = "system",
+                       timeout_seconds: int = 120, auto_ack: bool = True,
+                       probe_timeout_seconds: int = 20, retries: int = 0,
+                       retry_failed_targets: bool = False, retry_rounds: int = 1,
+                       fallback_to_email: bool = False,
+                       fallback_email_urgency: str = "urgent") -> Dict:
+        return self.comm_service.send_broadcast(
+            selector=selector,
+            message=message,
+            sender_id=sender_id,
+            timeout_seconds=timeout_seconds,
+            auto_ack=auto_ack,
+            probe_timeout_seconds=probe_timeout_seconds,
+            retries=retries,
+            retry_failed_targets=retry_failed_targets,
+            retry_rounds=retry_rounds,
+            fallback_to_email=fallback_to_email,
+            fallback_email_urgency=fallback_email_urgency
+        )
+
+    def query_message_history(self, limit: int = 50, sender_id: Optional[str] = None,
+                              target_id: Optional[str] = None, broadcast_id: Optional[str] = None) -> List[Dict]:
+        return self.comm_service.query_message_history(
+            limit=limit,
+            sender_id=sender_id,
+            target_id=target_id,
+            broadcast_id=broadcast_id
+        )
     
     def get_contact(self, agent_id: str) -> Optional[Dict]:
         """
