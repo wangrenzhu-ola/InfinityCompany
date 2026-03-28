@@ -17,6 +17,7 @@
 - 自动回执提示（消息自动附带 ACK 指令）
 - 群发广播（`all` / `role:<role>` / `ids:id1,id2`）
 - 消息持久化与历史追溯（jsonl 日志）
+- 统一消息信封格式（包含 `id/from/to/runtime_to/requires_reply/attempt`）
 
 **调用示例：**
 ```bash
@@ -45,7 +46,8 @@ acpx-infinity status chenping
 acpx-infinity history --limit 20
 ```
 
-**注意：** `acpx-infinity` 是 InfinityCompany 定制工具，支持所有虚拟公司 Agent ID。原生 `acpx` 仅支持系统预定义 agent，不支持我们的虚拟公司角色。
+**注意：** `acpx-infinity` 是 InfinityCompany 定制工具，支持虚拟公司 Agent ID。原生 `acpx` 仅支持系统预定义 agent，不支持我们的虚拟公司角色。当前已内置运行时映射：`caocan -> main`（用于兼容 OpenClaw 默认主代理命名）。所有实时消息必须通过 `acpx-infinity` 发送，禁止直接调用裸 `acpx`。
+当前限制：`liubang` 为人类负责人，只在通讯录中保留用于组织关系，不支持 `acpx-infinity` 实时发送与探测。
 
 ### 2. 异步沟通：`emergency_inbox` (邮件箱投递)
 当派发**非紧急的长期任务**、**大篇幅报告**，或者 `acpx` 暂时无法联系到目标时，使用异步邮箱投递。
@@ -73,7 +75,7 @@ python3 ~/.openclaw/workspace/skills/company-directory/send_email.py \
 2. **明确接收状态**：使用"收到，已执行/会继续处理"等明确字眼。
 
 **示例：**
-- **发件人 (刘邦)**: `acpx zhangliang "审核这个需求方案"`
+- **发件人 (刘邦)**: `acpx-infinity zhangliang "审核这个需求方案"`
 - **收件人 (张良)**: 收到关于审核需求方案的指令。方案审核通过，风险在可控范围内。
 
 ---
@@ -82,7 +84,7 @@ python3 ~/.openclaw/workspace/skills/company-directory/send_email.py \
 
 | 姓名 | 岗位 / 角色 | Agent ID | 核心职责 |
 |------|------------|----------|----------|
-| **刘邦** | Owner (主公) | `liubang` | 战略制定，最终决策，全系统任务编排 |
+| **刘邦** | Owner (主公，人类) | `liubang` | 战略制定，最终决策，全系统任务编排（不参与acpx实时通讯） |
 | **张良** | PM (产品经理) | `zhangliang` | 需求分析，产品设计，对外交付对接 |
 | **萧何** | Architect (架构师) | `xiaohe` | 系统架构设计，技术选型，代码审查 |
 | **韩信** | Dev (全栈研发) | `hanxin` | 核心编码实现，技术攻坚，代码交付 |

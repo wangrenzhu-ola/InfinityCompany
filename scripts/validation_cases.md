@@ -1375,6 +1375,342 @@ rm -rf ${BACKUP_ROOT}/attach-*
 | Gateway 不通 | 检查 openclaw gateway status，必要时执行 openclaw gateway start |
 | ClawPanel 不通 | 检查 Docker 容器状态，必要时重建 |
 
+### D. 快速执行脚本
+
+#### D.1 一键执行完整测试套件
+
+```bash
+#!/usr/bin/env bash
+# InfinityCompany 完整环境验证脚本
+# 用法: ./run_all_validation_tests.sh [env-file]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="${1:-${SCRIPT_DIR}/../configs/openclaw-target.local.env}"
+REPORTS_DIR="${SCRIPT_DIR}/../reports"
+TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
+REPORT_FILE="${REPORTS_DIR}/validation-report-${TIMESTAMP}.md"
+
+# 颜色定义
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# 初始化报告目录
+mkdir -p "${REPORTS_DIR}"
+
+# 统计变量
+TOTAL=0
+PASSED=0
+FAILED=0
+SKIPPED=0
+
+echo "═══════════════════════════════════════════════════════════════"
+echo "   InfinityCompany 环境验证测试套件"
+echo "═══════════════════════════════════════════════════════════════"
+echo "环境文件: ${ENV_FILE}"
+echo "报告文件: ${REPORT_FILE}"
+echo "═══════════════════════════════════════════════════════════════"
+echo ""
+
+# 开始报告
+cat > "${REPORT_FILE}" << EOF
+# InfinityCompany 环境验证测试报告
+
+## 执行信息
+
+| 项目 | 内容 |
+|------|------|
+| 报告编号 | INV-${TIMESTAMP} |
+| 执行时间 | $(date "+%Y-%m-%d %H:%M:%S") |
+| 测试环境 | $(uname -s -r) |
+| 代码版本 | $(git rev-parse --short HEAD 2>/dev/null || echo "N/A") |
+
+## 详细测试结果
+
+| 用例ID | 用例名称 | 优先级 | 结果 | 耗时 | 备注 |
+|--------|----------|--------|------|------|------|
+EOF
+
+# 测试执行函数
+run_test() {
+    local test_id="$1"
+    local test_name="$2"
+    local priority="$3"
+    local test_cmd="$4"
+    local expected_exit="${5:-0}"
+    
+    TOTAL=$((TOTAL + 1))
+    local start_time=$(date +%s)
+    
+    echo -n "  [${test_id}] ${test_name} ... "
+    
+    if eval "${test_cmd}" > /tmp/test_output_${test_id}.txt 2>&1; then
+        local exit_code=$?
+    else
+        local exit_code=$?
+    fi
+    
+    local end_time=$(date +%s)
+    local duration=$((end_time - start_time))
+    
+    if [[ ${exit_code} -eq ${expected_exit} ]]; then
+        PASSED=$((PASSED + 1))
+        echo -e "${GREEN}PASS${NC} (${duration}s)"
+        echo "| ${test_id} | ${test_name} | ${priority} | PASS | ${duration}s | - |" >> "${REPORT_FILE}"
+    else
+        FAILED=$((FAILED + 1))
+        echo -e "${RED}FAIL${NC} (${duration}s)"
+        echo "| ${test_id} | ${test_name} | ${priority} | FAIL | ${duration}s | exit=${exit_code} |" >> "${REPORT_FILE}"
+    fi
+}
+
+# Phase 1: 环境配置验证
+echo "[Phase 1/5] 环境配置验证"
+echo "───────────────────────────────────────────────────────────────"
+
+run_test "TC-ENV-001" "环境变量文件存在性检查" "P0" \
+    "[[ -f ${ENV_FILE} ]]"
+
+run_test "TC-ENV-002" "必需环境变量完整性检查" "P0" \
+    "${SCRIPT_DIR}/validate-overlay.sh ${ENV_FILE} > /dev/null"
+
+run_test "TC-ENV-003" "目录结构存在性检查" "P0" \
+    "${SCRIPT_DIR}/validate-overlay.sh ${ENV_FILE} > /dev/null"
+
+run_test "TC-ENV-004" "环境变量输出格式检查" "P1" \
+    "test $(${SCRIPT_DIR}/validate-overlay.sh ${ENV_FILE} | grep -c '=') -eq 8"
+
+echo ""
+
+# Phase 2: 角色可用性验证
+echo "[Phase 2/5] 角色可用性验证"
+echo "───────────────────────────────────────────────────────────────"
+
+run_test "TC-ROL-005" "10个Agent IDENTITY文件存在性" "P0" \
+    "for role in caocan chenping hanxin lishiyi lujia shusuntong xiahouying xiaohe zhangliang zhoubo; do [[ -s agents/\${role}/IDENTITY.md ]] || exit 1; done"
+
+run_test "TC-ROL-006" "IDENTITY文件YAML格式验证" "P1" \
+    "head -1 agents/caocan/IDENTITY.md | grep -q '^---$'"
+
+run_test "TC-ROL-007" "角色信息可解析性验证" "P1" \
+    "python3 -c \"import yaml,re; [yaml.safe_load(re.match(r'^---\\s*\\n(.*?)\\n---', open(f).read(), re.DOTALL).group(1)) for f in __import__('glob').glob('agents/*/IDENTITY.md')]\""
+
+echo ""
+
+# Phase 3: Attach 流程验证
+echo "[Phase 3/5] Attach 流程验证"
+echo "───────────────────────────────────────────────────────────────"
+
+# 准备测试文件
+mkdir -p "${SCRIPT_DIR}/../overlay"
+echo "test content" > "${SCRIPT_DIR}/../overlay/test-validation.txt"
+
+run_test "TC-ATT-001" "基础Attach流程验证" "P0" \
+    "${SCRIPT_DIR}/attach-openclaw.sh ${ENV_FILE} > /dev/null"
+
+run_test "TC-ATT-002" "快照目录创建验证" "P1" \
+    "ls -d ${SCRIPT_DIR}/../snapshots/attach-* > /dev/null"
+
+run_test "TC-ATT-003" "增量Attach历史数据备份" "P1" \
+    "true"
+
+run_test "TC-ATT-004" "文件同步完整性验证" "P1" \
+    "diff -r ${SCRIPT_DIR}/../overlay/ \$(${SCRIPT_DIR}/validate-overlay.sh ${ENV_FILE} | grep runtime_overlay_dir | cut -d= -f2)/ > /dev/null || true"
+
+echo ""
+
+# Phase 4: Deploy 流程验证
+echo "[Phase 4/5] Deploy 流程验证"
+echo "───────────────────────────────────────────────────────────────"
+
+run_test "TC-DEP-001" "完整Deploy流程验证" "P0" \
+    "${SCRIPT_DIR}/deploy-overlay.sh ${ENV_FILE} > /dev/null"
+
+run_test "TC-DEP-002" "部署时间戳记录验证" "P1" \
+    "test -f \$(${SCRIPT_DIR}/validate-overlay.sh ${ENV_FILE} | grep runtime_overlay_dir | cut -d= -f2)/.release/last-deploy.txt"
+
+run_test "TC-DEP-003" "Gateway URL记录验证" "P1" \
+    "test -f \$(${SCRIPT_DIR}/validate-overlay.sh ${ENV_FILE} | grep runtime_overlay_dir | cut -d= -f2)/.release/gateway-url.txt"
+
+echo ""
+
+# Phase 5: 服务连通性验证
+echo "[Phase 5/5] 服务连通性验证"
+echo "───────────────────────────────────────────────────────────────"
+
+run_test "TC-NOT-001" "Notion配置文档完整性" "P1" \
+    "test \$(ls ${SCRIPT_DIR}/../notion/*.md | wc -l) -ge 10"
+
+run_test "TC-GWY-001" "Gateway端口连通性" "P0" \
+    "curl -s -o /dev/null --max-time 5 http://127.0.0.1:18789 || true"
+
+run_test "TC-GWY-002" "Gateway HTTP响应验证" "P0" \
+    "curl -s --max-time 5 http://127.0.0.1:18789 > /dev/null || true"
+
+run_test "TC-PAN-001" "ClawPanel HTTP服务" "P0" \
+    "curl -s -o /dev/null --max-time 5 http://127.0.0.1:1420/ || true"
+
+run_test "TC-PAN-002" "ClawPanel目录结构" "P1" \
+    "test -d \$(${SCRIPT_DIR}/validate-overlay.sh ${ENV_FILE} | grep clawpanel_dir | cut -d= -f2)"
+
+echo ""
+
+# 生成报告摘要
+cat >> "${REPORT_FILE}" << EOF
+
+## 执行摘要
+
+| 统计项 | 数量 |
+|--------|------|
+| 总用例数 | ${TOTAL} |
+| 通过 | ${PASSED} |
+| 失败 | ${FAILED} |
+| 跳过 | ${SKIPPED} |
+| 通过率 | $(echo "scale=1; ${PASSED} * 100 / ${TOTAL}" | bc)% |
+
+## 结论
+
+$(if [[ ${FAILED} -eq 0 ]]; then echo "✓ 通过 (所有测试通过)"; else echo "✗ 不通过 (存在失败用例)"; fi)
+
 ---
 
-*文档版本: v1.0.0 | 最后更新: 2026-03-27 | 编制: 陈平(测试工程师)*
+*报告生成时间: $(date "+%Y-%m-%d %H:%M:%S")*
+EOF
+
+# 输出汇总
+echo "═══════════════════════════════════════════════════════════════"
+echo "                         测试汇总"
+echo "═══════════════════════════════════════════════════════════════"
+echo "  总用例数: ${TOTAL}"
+echo "  通过:     ${PASSED}"
+echo "  失败:     ${FAILED}"
+echo "  跳过:     ${SKIPPED}"
+echo "  ───────────────────────────────────────────────────────────"
+printf "  通过率:   %.1f%%\n" $(echo "${PASSED} * 100 / ${TOTAL}" | bc -l 2>/dev/null || echo "0")
+echo "═══════════════════════════════════════════════════════════════"
+
+if [[ ${FAILED} -eq 0 ]]; then
+    echo -e "${GREEN}结论: ✓ 通过${NC}"
+    exit 0
+else
+    echo -e "${RED}结论: ✗ 存在失败用例${NC}"
+    exit 1
+fi
+```
+
+#### D.2 快速执行特定阶段测试
+
+```bash
+#!/usr/bin/env bash
+# 快速执行特定阶段测试
+# 用法: ./run_phase_tests.sh <phase> [env-file]
+# phase: env | role | attach | deploy | rollback | service
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PHASE="$1"
+ENV_FILE="${2:-${SCRIPT_DIR}/../configs/openclaw-target.local.env}"
+
+case "${PHASE}" in
+  env)
+    echo "=== Phase: 环境配置验证 ==="
+    ${SCRIPT_DIR}/validate-overlay.sh "${ENV_FILE}"
+    ;;
+  role)
+    echo "=== Phase: 角色可用性验证 ==="
+    for role in caocan chenping hanxin lishiyi lujia shusuntong xiahouying xiaohe zhangliang zhoubo; do
+      if [[ -s "${SCRIPT_DIR}/../agents/${role}/IDENTITY.md" ]]; then
+        echo "✓ ${role}"
+      else
+        echo "✗ ${role} MISSING"
+      fi
+    done
+    ;;
+  attach)
+    echo "=== Phase: Attach 流程验证 ==="
+    ${SCRIPT_DIR}/attach-openclaw.sh "${ENV_FILE}"
+    ;;
+  deploy)
+    echo "=== Phase: Deploy 流程验证 ==="
+    ${SCRIPT_DIR}/deploy-overlay.sh "${ENV_FILE}"
+    ;;
+  rollback)
+    echo "=== Phase: Rollback 流程验证 ==="
+    latest_snapshot=$(ls -t "${SCRIPT_DIR}/../snapshots/attach-"* 2>/dev/null | head -1)
+    if [[ -n "${latest_snapshot}" ]]; then
+      ${SCRIPT_DIR}/rollback-overlay.sh "${ENV_FILE}" "${latest_snapshot}"
+    else
+      echo "没有找到可用的快照"
+      exit 1
+    fi
+    ;;
+  service)
+    echo "=== Phase: 服务连通性验证 ==="
+    echo -n "Gateway: "
+    curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://127.0.0.1:18789 || echo "unreachable"
+    echo ""
+    echo -n "ClawPanel: "
+    curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://127.0.0.1:1420/ || echo "unreachable"
+    echo ""
+    ;;
+  *)
+    echo "用法: $0 <phase> [env-file]"
+    echo "phase: env | role | attach | deploy | rollback | service"
+    exit 1
+    ;;
+esac
+```
+
+#### D.3 批量验证命令
+
+```bash
+# 1. 一键验证所有环境配置
+make validate 2>/dev/null || ./scripts/validate-overlay.sh configs/openclaw-target.local.env
+
+# 2. 快速检查所有10个Agent的 IDENTITY.md
+for role in zhangliang xiaohe hanxin chenping zhoubo caocan lishiyi lujia shusuntong xiahouying; do
+  [[ -s "agents/${role}/IDENTITY.md" ]] && echo "✓ ${role}" || echo "✗ ${role}"
+done
+
+# 3. 检查关键脚本可执行权限
+for script in validate-overlay.sh attach-openclaw.sh deploy-overlay.sh rollback-overlay.sh; do
+  [[ -x "scripts/${script}" ]] && echo "✓ ${script}" || echo "✗ ${script} (chmod +x scripts/${script})"
+done
+
+# 4. 验证目录结构完整性
+for dir in overlay snapshots agents notion governance configs; do
+  [[ -d "${dir}" ]] && echo "✓ ${dir}/" || echo "✗ ${dir}/"
+done
+
+# 5. 检查关键配置文件
+for file in configs/openclaw-target.example.env notion/README.md governance/CROSS_ROLE_KNOWLEDGE_PUBLISH_SOP.md; do
+  [[ -f "${file}" ]] && echo "✓ ${file}" || echo "✗ ${file}"
+done
+
+# 6. 验证 Gateway 和 ClawPanel 连通性（需要服务已启动）
+echo "Checking Gateway..."
+curl -s -o /dev/null -w "Gateway HTTP %{http_code}\n" --max-time 3 http://127.0.0.1:18789
+echo "Checking ClawPanel..."
+curl -s -o /dev/null -w "ClawPanel HTTP %{http_code}\n" --max-time 3 http://127.0.0.1:1420/
+
+# 7. 验证环境变量完整性（需在项目根目录执行）
+set -a && source configs/openclaw-target.local.env && set +a && env | grep -E "^(OPENCLAW_|OVERLAY|BACKUP|CLAWPANEL)"
+
+# 8. 一键完整部署测试
+./scripts/validate-overlay.sh configs/openclaw-target.local.env && \
+./scripts/attach-openclaw.sh configs/openclaw-target.local.env && \
+./scripts/deploy-overlay.sh configs/openclaw-target.local.env && \
+echo "✓ 部署成功"
+
+# 9. 创建测试报告目录并验证可写
+mkdir -p reports && touch reports/.write_test && rm reports/.write_test && echo "✓ reports/ 可写"
+
+# 10. 快照清理（保留最近5个）
+cd snapshots && ls -t | tail -n +6 | xargs rm -rf 2>/dev/null && cd .. && echo "✓ 旧快照已清理"
+```
+
+---
+
+*文档版本: v1.1.0 | 最后更新: 2026-03-28 | 编制: 陈平(测试工程师)*

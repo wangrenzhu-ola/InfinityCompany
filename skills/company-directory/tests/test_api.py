@@ -111,7 +111,7 @@ class TestCommunicationService(unittest.TestCase):
     def test_get_acpx_command(self):
         """测试生成 acpx 命令"""
         cmd = self.api.get_acpx_command("caocan", "测试消息")
-        self.assertIn("acpx", cmd)
+        self.assertIn("acpx-infinity", cmd)
         self.assertIn("caocan", cmd)
         self.assertIn("测试消息", cmd)
 
@@ -130,6 +130,18 @@ class TestCommunicationService(unittest.TestCase):
             )
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["delivery_status"], "read")
+        history = self.api.query_message_history(limit=1)
+        self.assertEqual(history[0]["requires_reply"], True)
+        self.assertIn("[ACPX-MSG v1]", history[0]["payload"])
+        self.assertIn("requires_reply=true", history[0]["payload"])
+
+    def test_send_acpx_message_human_target_blocked(self):
+        result = self.api.send_acpx_message(
+            target_id="liubang",
+            message="测试"
+        )
+        self.assertEqual(result["status"], "error")
+        self.assertIn("人类负责人", result["message"])
 
     @patch("src.services.CommunicationService._execute_openclaw_agent")
     def test_broadcast_and_history(self, mock_exec):
@@ -155,6 +167,24 @@ class TestCommunicationService(unittest.TestCase):
         mock_exec.return_value = {"status": "error", "error": "session file locked (timeout 10000ms)"}
         result = self.api.check_presence("chenping")
         self.assertEqual(result["status"], "busy")
+
+    @patch("src.services.CommunicationService._execute_openclaw_agent")
+    def test_presence_status_timeout_busy(self, mock_exec):
+        mock_exec.return_value = {"status": "error", "error": "命令执行超时（>20s）"}
+        result = self.api.check_presence("chenping")
+        self.assertEqual(result["status"], "busy")
+
+    @patch("src.services.CommunicationService._list_runtime_agent_ids")
+    def test_resolve_runtime_agent_id_alias(self, mock_runtime_ids):
+        mock_runtime_ids.return_value = ["main", "hanxin", "xiaohe"]
+        runtime_id = self.api.comm_service._resolve_runtime_agent_id("caocan")
+        self.assertEqual(runtime_id, "main")
+
+    @patch("src.services.CommunicationService._list_runtime_agent_ids")
+    def test_resolve_runtime_agent_id_direct(self, mock_runtime_ids):
+        mock_runtime_ids.return_value = ["main", "hanxin", "xiaohe"]
+        runtime_id = self.api.comm_service._resolve_runtime_agent_id("hanxin")
+        self.assertEqual(runtime_id, "hanxin")
 
     @patch("src.services.CommunicationService._execute_openclaw_agent")
     def test_send_acpx_message_retry_success(self, mock_exec):

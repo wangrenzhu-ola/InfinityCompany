@@ -1349,4 +1349,197 @@ jobs:
 
 ---
 
+## 附录：演练执行检查清单
+
+### 演练前准备清单
+
+| 序号 | 检查项 | 检查命令 | 预期结果 | 状态 |
+|-----|-------|---------|---------|------|
+| P-01 | 环境配置文件存在 | `test -f configs/openclaw-target.local.env && echo "PASS" || echo "FAIL"` | 输出 PASS | [ ] |
+| P-02 | 脚本文件可执行 | `test -x scripts/attach-openclaw.sh && test -x scripts/deploy-overlay.sh && test -x scripts/rollback-overlay.sh && echo "PASS" || echo "FAIL"` | 输出 PASS | [ ] |
+| P-03 | rsync 已安装 | `command -v rsync >/dev/null 2>&1 && echo "PASS" || echo "FAIL"` | 输出 PASS | [ ] |
+| P-04 | curl 已安装 | `command -v curl >/dev/null 2>&1 && echo "PASS" || echo "FAIL"` | 输出 PASS | [ ] |
+| P-05 | jq 已安装（可选） | `command -v jq >/dev/null 2>&1 && echo "PASS" || echo "SKIP"` | 输出 PASS 或 SKIP | [ ] |
+| P-06 | 快照目录可写 | `mkdir -p snapshots/test-write && rm -rf snapshots/test-write && echo "PASS" || echo "FAIL"` | 输出 PASS | [ ] |
+| P-07 | OpenClaw 基座目录存在 | `test -d runtime/openclaw-base 2>/dev/null || test -d ${OPENCLAW_BASE_DIR} && echo "PASS" || echo "FAIL"` | 输出 PASS | [ ] |
+| P-08 | ClawPanel 目录存在 | `test -d ../clawpanel 2>/dev/null || test -d ${CLAWPANEL_DIR} && echo "PASS" || echo "FAIL"` | 输出 PASS | [ ] |
+| P-09 | Overlay 源目录存在 | `test -d overlay && echo "PASS" || echo "FAIL"` | 输出 PASS | [ ] |
+| P-10 | 演练日志目录可创建 | `mkdir -p snapshots/drill-test && rmdir snapshots/drill-test && echo "PASS" || echo "FAIL"` | 输出 PASS | [ ] |
+
+#### 演练前环境变量确认
+
+```bash
+# 在演练前执行以下命令，确认所有环境变量正确加载
+export CONFIG_FILE="configs/openclaw-target.local.env"
+set -a && source ${CONFIG_FILE} && set +a
+
+# 验证所有必需变量
+echo "=== 环境变量检查 ==="
+echo "OPENCLAW_BASE_DIR: ${OPENCLAW_BASE_DIR:-❌ 未设置}"
+echo "OPENCLAW_USER_HOME: ${OPENCLAW_USER_HOME:-❌ 未设置}"
+echo "OPENCLAW_GATEWAY_URL: ${OPENCLAW_GATEWAY_URL:-❌ 未设置}"
+echo "CLAWPANEL_URL: ${CLAWPANEL_URL:-❌ 未设置}"
+echo "CLAWPANEL_DIR: ${CLAWPANEL_DIR:-❌ 未设置}"
+echo "OVERLAY_SOURCE_DIR: ${OVERLAY_SOURCE_DIR:-❌ 未设置}"
+echo "RUNTIME_OVERLAY_DIR: ${RUNTIME_OVERLAY_DIR:-❌ 未设置}"
+echo "BACKUP_ROOT: ${BACKUP_ROOT:-❌ 未设置}"
+```
+
+---
+
+### 演练中检查清单
+
+#### 场景 A：全新环境首次附着
+
+| 步骤 | 检查点 | 验证命令 | 预期结果 | 状态 |
+|-----|-------|---------|---------|------|
+| A-1 | 验证脚本退出码 | `echo $?` | 输出 0 | [ ] |
+| A-2 | snapshot 路径输出 | `grep "^snapshot="` | 输出包含 snapshot= 路径 | [ ] |
+| A-3 | 文件同步完成 | `diff -r overlay/ ${RUNTIME_OVERLAY_DIR}/ --exclude=.release 2>&1 \| wc -l` | 输出 0 | [ ] |
+| A-4 | 部署元数据创建 | `test -f ${RUNTIME_OVERLAY_DIR}/.release/last-deploy.txt && echo "PASS" || echo "FAIL"` | 输出 PASS | [ ] |
+| A-5 | Gateway 服务响应 | `curl -fsS ${OPENCLAW_GATEWAY_URL} >/dev/null 2>&1 && echo "PASS" || echo "FAIL"` | 输出 PASS | [ ] |
+| A-6 | ClawPanel 服务响应 | `curl -fsS ${CLAWPANEL_URL} >/dev/null 2>&1 && echo "PASS" || echo "FAIL"` | 输出 PASS | [ ] |
+
+#### 场景 B：OpenClaw 升级后重新附着
+
+| 步骤 | 检查点 | 验证命令 | 预期结果 | 状态 |
+|-----|-------|---------|---------|------|
+| B-1 | 升级前快照数记录 | `ls snapshots/attach-* 2>/dev/null \| wc -l` | 记录数字 | [ ] |
+| B-2 | 新快照创建成功 | `ls snapshots/attach-* 2>/dev/null \| wc -l` | 数字增加 | [ ] |
+| B-3 | 部署时间更新 | `cat ${RUNTIME_OVERLAY_DIR}/.release/last-deploy.txt` | 显示新时间戳 | [ ] |
+| B-4 | 数据一致性 | `diff -rq overlay/ ${RUNTIME_OVERLAY_DIR}/ --exclude=.release 2>&1 \| grep -c "differ"` | 输出 0 | [ ] |
+
+#### 场景 C：部署失败后回滚恢复
+
+| 步骤 | 检查点 | 验证命令 | 预期结果 | 状态 |
+|-----|-------|---------|---------|------|
+| C-1 | 回滚脚本执行成功 | `echo $?` | 输出 0 | [ ] |
+| C-2 | rolled_back_to 输出 | `grep "^rolled_back_to="` | 输出包含 rolled_back_to= 路径 | [ ] |
+| C-3 | 数据已恢复 | `diff -r <snapshot> ${RUNTIME_OVERLAY_DIR}/ --exclude=.release 2>&1 \| wc -l` | 输出 0 | [ ] |
+| C-4 | 服务恢复可用 | `curl -fsS ${OPENCLAW_GATEWAY_URL} >/dev/null 2>&1 && echo "PASS" || echo "FAIL"` | 输出 PASS | [ ] |
+| C-5 | 回滚耗时 < 30秒 | 计时检查 | 耗时 < 30s | [ ] |
+
+#### 场景 D：数据损坏后的快照恢复
+
+| 步骤 | 检查点 | 验证命令 | 预期结果 | 状态 |
+|-----|-------|---------|---------|------|
+| D-1 | 损坏文件已创建 | `echo "corrupted" > ${RUNTIME_OVERLAY_DIR}/test-file.txt` | 文件写入成功 | [ ] |
+| D-2 | 指定快照恢复成功 | `echo $?` | 输出 0 | [ ] |
+| D-3 | 损坏数据已清除 | `cat ${RUNTIME_OVERLAY_DIR}/test-file.txt 2>/dev/null` | 输出不为 "corrupted" | [ ] |
+| D-4 | 文件校验和匹配 | `md5sum <snapshot>/test-file.txt` vs `md5sum ${RUNTIME_OVERLAY_DIR}/test-file.txt` | 校验和相同 | [ ] |
+
+#### 场景 E：部分文件丢失的增量恢复
+
+| 步骤 | 检查点 | 验证命令 | 预期结果 | 状态 |
+|-----|-------|---------|---------|------|
+| E-1 | 模拟文件删除 | `rm ${RUNTIME_OVERLAY_DIR}/<file>` | 删除成功 | [ ] |
+| E-2 | 文件确实不存在 | `test -f ${RUNTIME_OVERLAY_DIR}/<file> && echo "FAIL" || echo "PASS"` | 输出 PASS | [ ] |
+| E-3 | attach 执行成功 | `echo $?` | 输出 0 | [ ] |
+| E-4 | 文件已恢复 | `test -f ${RUNTIME_OVERLAY_DIR}/<file> && echo "PASS" || echo "FAIL"` | 输出 PASS | [ ] |
+| E-5 | 增量恢复耗时 | 计时检查 | 耗时 < 10s | [ ] |
+
+---
+
+### 演练后验证清单
+
+| 序号 | 检查项 | 验证命令 | 预期结果 | 状态 |
+|-----|-------|---------|---------|------|
+| V-01 | 所有服务正常运行 | `./scripts/run-drill-checks.sh service` | 显示 [PASS] Gateway/ClawPanel | [ ] |
+| V-02 | 文件完整性验证 | `./scripts/run-drill-checks.sh integrity` | 显示 [PASS] File integrity | [ ] |
+| V-03 | 配置正确性验证 | `./scripts/run-drill-checks.sh config` | 显示 [PASS] Config validation | [ ] |
+| V-04 | 快照可用性验证 | `./scripts/run-drill-checks.sh snapshot` | 显示快照数量 >= 1 | [ ] |
+| V-05 | 清理演练测试文件 | `rm -f ${RUNTIME_OVERLAY_DIR}/test-file.txt` | 删除成功 | [ ] |
+| V-06 | 验证无残留测试数据 | `find ${RUNTIME_OVERLAY_DIR} -name "*test*" -o -name "*corrupted*" 2>/dev/null \| wc -l` | 输出 0 | [ ] |
+| V-07 | 部署元数据完整 | `cat ${RUNTIME_OVERLAY_DIR}/.release/last-deploy.txt` | 显示有效时间戳 | [ ] |
+| V-08 | 演练日志已保存 | `ls snapshots/drill-*/drill-log.txt 2>/dev/null \| tail -1` | 显示最新日志文件 | [ ] |
+
+#### 演练后状态汇总命令
+
+```bash
+#!/bin/bash
+# 演练后快速状态检查
+
+echo "=========================================="
+echo "      演练后状态汇总"
+echo "=========================================="
+
+# 加载配置
+CONFIG_FILE="${1:-configs/openclaw-target.local.env}"
+set -a && source ${CONFIG_FILE} && set +a
+
+echo ""
+echo "1. 服务状态:"
+echo "   Gateway:    $(curl -fsS ${OPENCLAW_GATEWAY_URL} >/dev/null 2>&1 && echo "✅ 正常" || echo "❌ 异常")"
+echo "   ClawPanel:  $(curl -fsS ${CLAWPANEL_URL} >/dev/null 2>&1 && echo "✅ 正常" || echo "❌ 异常")"
+
+echo ""
+echo "2. 文件完整性:"
+MISSING=$(find ${OVERLAY_SOURCE_DIR} -type f 2>/dev/null | while read f; do
+    rel_path="${f#${OVERLAY_SOURCE_DIR}/}"
+    [[ ! -f "${RUNTIME_OVERLAY_DIR}/${rel_path}" ]] && echo "MISSING: ${rel_path}"
+done | wc -l)
+[[ ${MISSING} -eq 0 ]] && echo "   ✅ 所有文件已同步" || echo "   ❌ 发现 ${MISSING} 个文件缺失"
+
+echo ""
+echo "3. 快照状态:"
+SNAPSHOT_COUNT=$(ls -1d ${BACKUP_ROOT}/attach-* 2>/dev/null | wc -l)
+echo "   📸 现有快照数量: ${SNAPSHOT_COUNT}"
+LATEST=$(ls -1td ${BACKUP_ROOT}/attach-* 2>/dev/null | head -1)
+[[ -n "${LATEST}" ]] && echo "   📁 最新快照: $(basename ${LATEST})"
+
+echo ""
+echo "4. 部署状态:"
+if [[ -f "${RUNTIME_OVERLAY_DIR}/.release/last-deploy.txt" ]]; then
+    DEPLOY_TIME=$(cat "${RUNTIME_OVERLAY_DIR}/.release/last-deploy.txt")
+    echo "   🚀 上次部署: ${DEPLOY_TIME}"
+else
+    echo "   ⚠️  未找到部署记录"
+fi
+
+echo ""
+echo "=========================================="
+```
+
+---
+
+### 检查清单使用说明
+
+#### 使用方法
+
+1. **演练前**: 逐一检查所有 P-01 到 P-10 项，确保环境就绪
+2. **演练中**: 根据执行的场景，完成对应检查点
+3. **演练后**: 执行 V-01 到 V-08 验证，确保系统恢复正常
+
+#### 快速检查命令
+
+```bash
+# 一键执行所有演练前检查
+cd /Users/wangrenzhu/work/MetaClaw/InfinityCompany
+./scripts/run-drill-checks.sh all
+
+# 只检查环境
+./scripts/run-drill-checks.sh env
+
+# 只检查服务
+./scripts/run-drill-checks.sh service
+
+# 只检查文件完整性
+./scripts/run-drill-checks.sh integrity
+
+# 只检查快照
+./scripts/run-drill-checks.sh snapshot
+
+# 快速检查（所有关键检查点）
+./scripts/run-drill-checks.sh quick
+```
+
+#### 状态标记说明
+
+- `[ ]` - 未执行
+- `[x]` - 已通过
+- `[-]` - 已跳过
+- `[!]` - 失败，需要处理
+
+---
+
 **文档结束**

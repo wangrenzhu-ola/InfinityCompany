@@ -10,7 +10,7 @@ import subprocess
 from pathlib import Path
 from typing import List, Optional, Dict
 from datetime import datetime
-from .models import Agent, AgentRole, OrganizationUnit, Email
+from .models import Agent, AgentRole, Email
 from .storage import Storage
 from .constants import ESCALATION_PATHS
 
@@ -100,6 +100,10 @@ class CommunicationService:
         self.storage = storage
         self.inbox_base_path = inbox_base_path or "~/.openclaw/workspace/emergency_inbox"
         self.acpx_store_path = os.path.expanduser("~/.openclaw/workspace/company-directory/messages/acpx_messages.jsonl")
+        self.runtime_agent_aliases = {
+            "caocan": "main",
+        }
+        self.human_only_agents = {"liubang"}
     
     def send_email(self, target_id: str, subject: str, message: str, 
                    sender_id: str = "system", urgency: str = "normal",
@@ -211,9 +215,8 @@ class CommunicationService:
         Returns:
             可执行的 acpx 命令字符串
         """
-        # 转义消息中的特殊字符
         escaped_message = message.replace('"', '\\"')
-        return f"acpx {target_id} \"{escaped_message}\""
+        return f"acpx-infinity {target_id} \"{escaped_message}\""
 
     def check_agent_presence(self, agent_id: str, timeout_seconds: int = 20) -> Dict:
         target = self.storage.get_agent(agent_id)
@@ -221,6 +224,11 @@ class CommunicationService:
             return {
                 "status": "unknown",
                 "message": f"未知的 Agent ID: {agent_id}"
+            }
+        if agent_id in self.human_only_agents:
+            return {
+                "status": "unsupported",
+                "message": f"{target.name} 为人类负责人，不支持 acpx 实时探测",
             }
 
         probe_message = "状态探测: 仅回复 ONLINE_ACK"
@@ -230,17 +238,28 @@ class CommunicationService:
                 "status": "online",
                 "message": f"{target.name} 在线并可响应",
                 "response_preview": result.get("response", "")[:120],
+                "runtime_agent_id": result.get("runtime_agent_id", agent_id),
             }
-        if "session file locked" in result.get("error", ""):
+        error_text = (result.get("error") or "").lower()
+        if "session file locked" in error_text:
             return {
                 "status": "busy",
                 "message": f"{target.name} 当前会话被锁定",
-                "error": result.get("error", "")
+                "error": result.get("error", ""),
+                "runtime_agent_id": result.get("runtime_agent_id", agent_id),
+            }
+        if "timeout" in error_text or "超时" in error_text:
+            return {
+                "status": "busy",
+                "message": f"{target.name} 当前可能繁忙或响应超时",
+                "error": result.get("error", ""),
+                "runtime_agent_id": result.get("runtime_agent_id", agent_id),
             }
         return {
             "status": "offline",
             "message": f"{target.name} 未在探测时响应",
-            "error": result.get("error", "")
+            "error": result.get("error", ""),
+            "runtime_agent_id": result.get("runtime_agent_id", agent_id),
         }
 
     def send_acpx_message(self, target_id: str, message: str, sender_id: str = "system",
@@ -255,25 +274,35 @@ class CommunicationService:
                 "message": f"未知的 Agent ID: {target_id}",
                 "valid_agents": [a.agent_id for a in self.storage.list_all_agents()]
             }
+        if target_id in self.human_only_agents:
+            return {
+                "status": "error",
+                "message": f"{target.name} 为人类负责人，不支持 acpx 实时消息，请改用线下沟通或人工渠道",
+            }
 
         sender = self.storage.get_agent(sender_id)
         sender_name = sender.name if sender else (sender_id if sender_id != "system" else "系统")
         message_id = str(uuid.uuid4())
+        runtime_agent_id = self._resolve_runtime_agent_id(target_id)
         presence = self.check_agent_presence(target_id, timeout_seconds=probe_timeout_seconds)
-
-        payload = message
-        if auto_ack:
-            payload = (
-                f"[MSG_ID:{message_id}][FROM:{sender_id}] {message}\n"
-                f"请按格式回执: ACK {message_id}"
-            )
 
         attempts = max(retries, 0) + 1
         result = {"status": "error", "error": "未执行"}
         response_text = ""
         errors: List[str] = []
-        for _ in range(attempts):
-            result = self._execute_openclaw_agent(target_id, payload, timeout_seconds)
+        payload = ""
+        for attempt in range(1, attempts + 1):
+            payload = self._build_acpx_payload(
+                message_id=message_id,
+                sender_id=sender_id,
+                target_id=target_id,
+                runtime_agent_id=runtime_agent_id,
+                message=message,
+                auto_ack=auto_ack,
+                attempt=attempt,
+                attempts=attempts
+            )
+            result = self._execute_openclaw_agent(target_id, payload, timeout_seconds, runtime_agent_id=runtime_agent_id)
             response_text = result.get("response", "")
             if result["status"] == "success":
                 break
@@ -319,10 +348,12 @@ class CommunicationService:
             "target_name": target.name,
             "message": message,
             "payload": payload,
+            "runtime_agent_id": runtime_agent_id,
             "timestamp": datetime.now().isoformat(),
             "target_status": presence.get("status"),
             "delivery_status": receipt_status,
             "attempts": attempts,
+            "requires_reply": auto_ack,
             "auto_ack": auto_ack,
             "response": response_text,
             "error": result.get("error"),
@@ -339,10 +370,12 @@ class CommunicationService:
             "target_status": presence.get("status"),
             "delivery_status": receipt_status,
             "attempts": attempts,
+            "requires_reply": auto_ack,
             "response": response_text,
             "error": result.get("error"),
             "errors": errors,
             "fallback_email_result": fallback_email_result,
+            "runtime_agent_id": result.get("runtime_agent_id", target_id),
         }
 
     def send_broadcast(self, selector: str, message: str, sender_id: str = "system",
@@ -460,15 +493,17 @@ class CommunicationService:
             "agent_id": agent.agent_id,
             "name": agent.name,
             "title": agent.title,
-            "acpx_command": f"acpx {agent.agent_id} \"你的消息\"",
+            "acpx_command": f"acpx-infinity {agent.agent_id} \"你的消息\"",
             "inbox_path": f"~/.openclaw/workspace/emergency_inbox/{agent.agent_id}",
             "email": agent.email or f"{agent.agent_id}@infinity.company",
         }
 
-    def _execute_openclaw_agent(self, agent_id: str, message: str, timeout_seconds: int) -> Dict:
+    def _execute_openclaw_agent(self, agent_id: str, message: str, timeout_seconds: int,
+                                runtime_agent_id: Optional[str] = None) -> Dict:
+        runtime_agent_id = runtime_agent_id or self._resolve_runtime_agent_id(agent_id)
         cmd = [
             "openclaw", "agent",
-            "--agent", agent_id,
+            "--agent", runtime_agent_id,
             "--timeout", str(timeout_seconds),
             "--message", message
         ]
@@ -497,11 +532,64 @@ class CommunicationService:
                 "status": "error",
                 "response": stdout,
                 "error": combined_error or f"命令返回码 {proc.returncode}",
+                "runtime_agent_id": runtime_agent_id,
             }
         return {
             "status": "success",
             "response": stdout,
+            "runtime_agent_id": runtime_agent_id,
         }
+
+    def _build_acpx_payload(self, message_id: str, sender_id: str, target_id: str,
+                            runtime_agent_id: str, message: str, auto_ack: bool,
+                            attempt: int, attempts: int) -> str:
+        requires_reply = "true" if auto_ack else "false"
+        lines = [
+            "[ACPX-MSG v1]",
+            f"id={message_id}",
+            f"from={sender_id}",
+            f"to={target_id}",
+            f"runtime_to={runtime_agent_id}",
+            f"requires_reply={requires_reply}",
+            f"attempt={attempt}/{attempts}",
+            f"timestamp={datetime.now().isoformat()}",
+            "content<<",
+            message,
+            ">>content",
+        ]
+        if auto_ack:
+            lines.append(f"reply_format=ACK {message_id}")
+        lines.append("[/ACPX-MSG]")
+        return "\n".join(lines)
+
+    def _resolve_runtime_agent_id(self, agent_id: str) -> str:
+        runtime_ids = self._list_runtime_agent_ids()
+        if not runtime_ids:
+            return self.runtime_agent_aliases.get(agent_id, agent_id)
+        if agent_id in runtime_ids:
+            return agent_id
+        mapped = self.runtime_agent_aliases.get(agent_id)
+        if mapped and mapped in runtime_ids:
+            return mapped
+        return agent_id
+
+    def _list_runtime_agent_ids(self) -> List[str]:
+        try:
+            proc = subprocess.run(
+                ["openclaw", "agents", "list"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+        except Exception:
+            return []
+        output = (proc.stdout or "") + "\n" + (proc.stderr or "")
+        ids: List[str] = []
+        for line in output.splitlines():
+            m = re.match(r"^- ([^\s]+)", line.strip())
+            if m:
+                ids.append(m.group(1))
+        return ids
 
     def _sanitize_agent_output(self, raw: str) -> str:
         lines = []
@@ -532,7 +620,7 @@ class CommunicationService:
 
     def _resolve_targets(self, selector: str) -> List[str]:
         if selector == "all":
-            return [a.agent_id for a in self.storage.list_all_agents()]
+            return [a.agent_id for a in self.storage.list_all_agents() if a.agent_id not in self.human_only_agents]
 
         if selector.startswith("role:"):
             role_name = selector.split(":", 1)[1].strip()
@@ -542,18 +630,18 @@ class CommunicationService:
                 role = AgentRole(role_name)
             except ValueError:
                 return []
-            return [a.agent_id for a in self.storage.find_agents_by_role(role)]
+            return [a.agent_id for a in self.storage.find_agents_by_role(role) if a.agent_id not in self.human_only_agents]
 
         if selector.startswith("ids:"):
             raw_ids = selector.split(":", 1)[1]
             parsed = [x.strip() for x in raw_ids.split(",") if x.strip()]
             valid = []
             for aid in parsed:
-                if self.storage.get_agent(aid):
+                if self.storage.get_agent(aid) and aid not in self.human_only_agents:
                     valid.append(aid)
             return valid
 
-        if self.storage.get_agent(selector):
+        if self.storage.get_agent(selector) and selector not in self.human_only_agents:
             return [selector]
         return []
 

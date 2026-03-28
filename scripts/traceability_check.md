@@ -2816,6 +2816,273 @@ jobs:
 
 ---
 
-**文档版本**: v1.0  
-**最后更新**: 2026-03-27  
+## 附录 A：可执行校验命令
+
+### A.1 Git 提交信息快速检查命令
+
+#### 检查最近7天的提交信息格式
+```bash
+# 检查提交信息是否符合 Conventional Commits
+git log --since="7 days ago" --pretty=format:"%s" | grep -E '^(feat|fix|docs|style|refactor|test|chore|design|workflow|agent)(\([a-zA-Z0-9_/:-]+\))?!?: .+' | wc -l
+
+# 检查不符合规范的提交
+git log --since="7 days ago" --pretty=format:"%H %s" | while read hash msg; do
+  if ! [[ "$msg" =~ ^(feat|fix|docs|style|refactor|test|chore|design|workflow|agent)(\([a-zA-Z0-9_/:-]+\))?!?:\ .+ ]]; then
+    echo "不合规: $hash - $msg"
+  fi
+done
+```
+
+#### 按角色统计提交数量
+```bash
+# 按作者统计最近7天提交
+git log --since="7 days ago" --pretty=format:"%an" | sort | uniq -c | sort -rn
+
+# 按角色统计（基于用户名映射）
+git log --since="7 days ago" --pretty=format:"%an" | awk '
+  { count[$0]++ }
+  END {
+    for (author in count) {
+      role = author
+      if (author ~ /hanxin|韩信/) role = "韩信(研发)"
+      else if (author ~ /zhangliang|张良/) role = "张良(产品)"
+      else if (author ~ /xiaohe|萧何/) role = "萧何(架构)"
+      else if (author ~ /zhoubo|周勃/) role = "周勃(运维)"
+      else if (author ~ /caocan|曹参/) role = "曹参(PMO)"
+      else if (author ~ /lujia|陆贾/) role = "陆贾(知识库)"
+      else if (author ~ /chenping|陈平/) role = "陈平(测试)"
+      else if (author ~ /shusuntong|叔孙通/) role = "叔孙通(设计)"
+      print role ": " count[author] "次"
+    }
+  }'
+```
+
+#### 检查提交关联 Story/Task ID
+```bash
+# 检查未关联任务ID的提交
+git log --since="7 days ago" --pretty=format:"%H %s" | grep -v -E '#[0-9]+|\[NOTION-[A-Z0-9-]+\]'
+
+# 统计关联率
+total=$(git log --since="7 days ago" --oneline | wc -l)
+linked=$(git log --since="7 days ago" --pretty=format:"%s" | grep -E '#[0-9]+|\[NOTION-[A-Z0-9-]+\]' | wc -l)
+echo "关联率: $linked/$total ($(($linked * 100 / $total))%)"
+```
+
+#### 检查分支命名规范
+```bash
+# 列出所有不合规的分支
+git branch -a | sed 's/^[* ]*//' | grep -v -E '^(main|develop|feature/[a-z0-9-]+|hotfix/[a-z0-9-]+|release/v[0-9]+\.[0-9]+\.[0-9]+|remotes/origin/(main|develop|feature/[a-z0-9-]+|hotfix/[a-z0-9-]+|release/v[0-9]+\.[0-9]+\.[0-9]+))$'
+```
+
+### A.2 文档更新时间戳检查命令
+
+#### 检查文档最后更新时间
+```bash
+# 检查所有 Markdown 文档的最后修改时间
+find . -name "*.md" -type f ! -path "./node_modules/*" ! -path "./.git/*" -exec stat -c "%Y %n" {} \; | sort -rn | head -20
+
+# 检查超过90天未更新的文档
+find . -name "*.md" -type f ! -path "./node_modules/*" ! -path "./.git/*" -mtime +90 -exec ls -lh {} \;
+```
+
+#### 检查文档时间戳与 Git 提交一致性
+```bash
+# 检查文档修改时间与 Git 提交时间差异
+check_doc_timestamp() {
+  local doc="$1"
+  local file_time=$(stat -c %Y "$doc" 2>/dev/null || stat -f %m "$doc" 2>/dev/null)
+  local git_time=$(git log -1 --format=%at -- "$doc" 2>/dev/null)
+  
+  if [ -n "$git_time" ] && [ -n "$file_time" ]; then
+    local diff=$(($file_time - $git_time))
+    [ ${diff#-} -gt 60 ] && echo "时间不一致: $doc (差异 ${diff}秒)"
+  fi
+}
+
+# 遍历检查所有文档
+for doc in $(find . -name "*.md" -type f ! -path "./node_modules/*" ! -path "./.git/*"); do
+  check_doc_timestamp "$doc"
+done
+```
+
+#### 检查关键文档列表
+```bash
+# 列出关键文档及其状态
+echo "=== 角色 IDENTITY 文档 ==="
+for agent in zhangliang xiaohe hanxin chenping zhoubo caocan lishiyi lujia shusuntong xiahouying; do
+  file="agents/$agent/IDENTITY.md"
+  if [ -f "$file" ]; then
+    mtime=$(stat -c %y "$file" 2>/dev/null | cut -d' ' -f1)
+    echo "✅ $agent: $mtime"
+  else
+    echo "❌ $agent: 文件缺失"
+  fi
+done
+
+echo ""
+echo "=== 工作流程文档 ==="
+for workflow in external_assistant_workflow.md personal_assistant_workflow.md internal_delivery_workflow.md; do
+  file="workflows/$workflow"
+  if [ -f "$file" ]; then
+    mtime=$(stat -c %y "$file" 2>/dev/null | cut -d' ' -f1)
+    echo "✅ $workflow: $mtime"
+  else
+    echo "❌ $workflow: 文件缺失"
+  fi
+done
+```
+
+### A.3 角色文件完整性检查命令
+
+#### 检查所有必需 Agent 的 IDENTITY 文件
+```bash
+#!/bin/bash
+# check_agents.sh - 快速检查 Agent 文件完整性
+
+REQUIRED_AGENTS=(
+  "zhangliang:张良(产品经理)"
+  "xiaohe:萧何(架构师)"
+  "hanxin:韩信(全栈研发)"
+  "chenping:陈平(测试工程师)"
+  "zhoubo:周勃(运维工程师)"
+  "caocan:曹参(PMO)"
+  "lishiyi:郦食其(外部助理)"
+  "lujia:陆贾(知识库管理员)"
+  "shusuntong:叔孙通(设计师)"
+  "xiahouying:夏侯婴(私人助理)"
+)
+
+MISSING=0
+INCOMPLETE=0
+
+echo "=== Agent IDENTITY 文件检查 ==="
+for agent_info in "${REQUIRED_AGENTS[@]}"; do
+  agent_id="${agent_info%%:*}"
+  agent_name="${agent_info##*:}"
+  identity_file="agents/$agent_id/IDENTITY.md"
+  
+  if [ ! -f "$identity_file" ]; then
+    echo "❌ 缺失: $agent_name ($identity_file)"
+    ((MISSING++))
+  else
+    # 检查必需内容
+    content=$(cat "$identity_file" 2>/dev/null)
+    
+    # 检查关键字段
+    has_all=true
+    for keyword in "模型配置" "官方职位" "核心权责"; do
+      if ! echo "$content" | grep -q "$keyword"; then
+        echo "⚠️  $agent_name: 缺少 '$keyword'"
+        has_all=false
+      fi
+    done
+    
+    if [ "$has_all" = true ]; then
+      echo "✅ $agent_name"
+    else
+      ((INCOMPLETE++))
+    fi
+  fi
+done
+
+echo ""
+echo "统计: 缺失=$MISSING 不完整=$INCOMPLETE"
+[ "$MISSING" -eq 0 ] && [ "$INCOMPLETE" -eq 0 ] && echo "✅ 所有 Agent 文件完整"
+```
+
+#### 检查工作流程文档完整性
+```bash
+#!/bin/bash
+# check_workflows.sh - 检查工作流程文档
+
+REQUIRED_WORKFLOWS=(
+  "external_assistant_workflow.md:外部助理流程"
+  "personal_assistant_workflow.md:私人助理流程"
+  "internal_delivery_workflow.md:交付闭环流程"
+)
+
+echo "=== 工作流程文档检查 ==="
+for wf_info in "${REQUIRED_WORKFLOWS[@]}"; do
+  filename="${wf_info%%:*}"
+  name="${wf_info##*:}"
+  filepath="workflows/$filename"
+  
+  if [ ! -f "$filepath" ]; then
+    echo "❌ 缺失: $name"
+  else
+    # 检查章节完整性
+    content=$(cat "$filepath")
+    has_overview=$(echo "$content" | grep -c "流程概述")
+    has_steps=$(echo "$content" | grep -c "执行步骤")
+    
+    if [ "$has_overview" -gt 0 ] && [ "$has_steps" -gt 0 ]; then
+      echo "✅ $name"
+    else
+      echo "⚠️  $name: 章节不完整"
+    fi
+  fi
+done
+```
+
+### A.4 一键执行命令
+
+#### 快速执行所有检查
+```bash
+# 使用本脚本执行完整检查
+cd InfinityCompany
+./scripts/traceability_check.sh
+
+# 仅执行 Git 检查
+./scripts/traceability_check.sh git
+
+# 仅执行文档检查
+./scripts/traceability_check.sh docs
+
+# 仅执行 Agent 检查
+./scripts/traceability_check.sh agents
+
+# 指定时间范围
+./scripts/traceability_check.sh all --since "3 days ago"
+```
+
+#### CI/CD 集成命令
+```bash
+# GitHub Actions / GitLab CI 中使用
+./scripts/traceability_check.sh all --since "1 day ago" || exit 1
+```
+
+---
+
+## 附录 B：角色职责速查表
+
+### B.1 各角色检查职责
+
+| 角色 | 主要职责 | 检查频率 | 检查内容 |
+|-----|---------|---------|---------|
+| **周勃** | 运维检查 | 每日 18:00 | 环境检查、脚本执行、报告生成 |
+| **曹参** | PMO 检查 | 每日 | 复盘及时性、Notion 看板、改进项跟进 |
+| **陆贾** | 知识库检查 | 每日 | 文档完整性、模板合规、版本关联 |
+| **萧何** | 架构检查 | 每次提交 | 代码提交规范、分支策略、技术文档 |
+| **韩信** | 研发自查 | 每次提交 | 代码提交信息、Task 状态、工时记录 |
+| **陈平** | 测试检查 | 每日 | Bug 记录完整性、修复说明、验证记录 |
+| **张良** | 产品审查 | 每周 | 需求关联、Story 规范、PRD 版本 |
+| **夏侯婴** | 助理分发 | 实时 | 异常告警分发、跟踪处理进度 |
+
+### B.2 检查频率对照表
+
+| 检查项 | 频率 | 触发方式 | 执行者 |
+|-------|-----|---------|-------|
+| 提交信息格式 | 实时 | Git Hook | 自动 |
+| 分支命名规范 | 每日 | 脚本检查 | 周勃 |
+| 文档时间戳 | 每日 | 脚本检查 | 自动 |
+| Agent 文件完整性 | 每日 | 脚本检查 | 自动 |
+| Notion 必填字段 | 每日 | Notion API | 自动 |
+| 复盘及时性 | 每日 | Notion API | 自动 |
+| 改进项跟进 | 每周 | 脚本检查 | 曹参 |
+| 合规报告审查 | 每周 | 手动 | 张良 |
+
+---
+
+**文档版本**: v1.1  
+**最后更新**: 2026-03-28  
 **维护者**: 陆贾(知识库管理员) / 周勃(运维工程师)

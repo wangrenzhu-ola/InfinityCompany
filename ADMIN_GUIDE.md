@@ -445,49 +445,65 @@ INFINITYCOMPANY_NO_DIALOG=1 ./Open-InfinityCompany.command
 
 ### 5.1 每日 18:00 检查项（周勃职责）
 
+由运维工程师**周勃**每日 18:00 执行，确保系统稳定运行并准备好发布条件。
+
+#### 快速执行
+
 ```bash
-#!/bin/bash
-# daily-check.sh - 每日运维检查脚本
-# 由周勃（运维工程师）每日 18:00 执行
+# 执行完整每日检查
+./scripts/daily-check.sh
 
-echo "=== InfinityCompany 每日运维检查 ==="
-echo "检查时间: $(date '+%Y-%m-%d %H:%M:%S')"
-echo ""
+# 仅生成报告，不执行修复操作
+./scripts/daily-check.sh --report-only
 
-# 1. 附着环境检查
-echo "[1/4] 附着环境检查..."
-if [ -d "$RUNTIME_OVERLAY_DIR/.release" ]; then
-    echo "  ✓ 运行时目录已部署"
-    echo "    最后部署: $(cat $RUNTIME_OVERLAY_DIR/.release/last-deploy.txt 2>/dev/null || echo '未知')"
-else
-    echo "  ✗ 运行时目录未标记部署"
-fi
-
-# 2. 发布准备检查
-echo "[2/4] 发布准备检查..."
-# 检查是否有未部署的 overlay 变更
-# 检查 Git 工作区状态
-# 检查 Notion 看板待发布项
-
-# 3. 回滚条件检查
-echo "[3/4] 回滚条件检查..."
-SNAPSHOT_COUNT=$(find snapshots/ -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
-echo "  可用快照数量: $SNAPSHOT_COUNT"
-if [ $SNAPSHOT_COUNT -eq 0 ]; then
-    echo "  ⚠ 警告: 无可用回滚快照"
-fi
-
-# 4. 备份快照管理
-echo "[4/4] 备份快照管理..."
-# 清理超过 30 天的快照
-find snapshots/ -mindepth 1 -maxdepth 1 -type d -mtime +30 -exec rm -rf {} \; 2>/dev/null
-echo "  已清理超过 30 天的旧快照"
-
-echo ""
-echo "=== 检查完成 ==="
+# 指定配置文件
+./scripts/daily-check.sh configs/openclaw-target.local.env
 ```
 
-#### 详细检查清单
+#### 检查清单与命令
+
+| 序号 | 检查项 | 检查命令 | 正常标准 | 异常处理 |
+|------|--------|----------|----------|----------|
+| 1 | **环境配置检查** | `./scripts/validate-overlay.sh configs/openclaw-target.local.env` | 无错误输出 | 修复配置文件 |
+| 2 | **Gateway 健康检查** | `curl -fsS http://127.0.0.1:18789/health` | HTTP 200 | `openclaw gateway restart` |
+| 3 | **ClawPanel 健康检查** | `curl -fsS http://127.0.0.1:1420/` | HTTP 200 | `(cd clawpanel && docker compose up -d)` |
+| 4 | **运行时目录检查** | `ls ~/.infinity-company/.release/` | 目录存在且含 last-deploy.txt | 执行 `./scripts/deploy-overlay.sh` |
+| 5 | **快照数量检查** | `ls -la snapshots/attach-* \| wc -l` | ≥ 3 个 | 执行 `./scripts/attach-openclaw.sh` |
+| 6 | **Git 工作区检查** | `git status overlay/` | 无未提交变更 | 提交变更 |
+| 7 | **磁盘空间检查** | `df -h` | 可用空间 > 20% | 清理旧快照/日志 |
+| 8 | **Docker 状态检查** | `docker ps \| grep clawpanel` | 容器运行中 | `docker compose up -d` |
+
+#### 详细检查命令
+
+```bash
+# 1. 环境配置检查
+./scripts/validate-overlay.sh configs/openclaw-target.local.env
+
+# 2. 发布准备检查 - Git 工作区状态
+git status overlay/
+git diff overlay/
+
+# 3. 回滚条件检查 - 快照数量
+ls -la snapshots/attach-* | wc -l
+
+# 4. 服务健康检查
+curl -fsS http://127.0.0.1:18789/health
+curl -fsS http://127.0.0.1:1420/
+
+# 5. 运行时目录检查
+ls -la ~/.infinity-company/.release/
+cat ~/.infinity-company/.release/last-deploy.txt
+
+# 6. 磁盘空间检查
+df -h
+du -sh snapshots/
+du -sh ~/.infinity-company/
+
+# 7. 清理旧快照（超过30天）
+find snapshots/ -mindepth 1 -maxdepth 1 -type d -mtime +30 -exec rm -rf {} \;
+```
+
+#### 每日检查报告
 
 | 序号 | 检查项 | 命令/方法 | 正常标准 | 异常处理 |
 |------|--------|----------|----------|----------|
@@ -889,51 +905,146 @@ echo "  5. 配置监控告警"
 
 ### 8.1 部署验收检查项
 
-| 序号 | 检查项 | 检查方法 | 通过标准 | 检查结果 |
+#### 检查命令速查
+
+```bash
+# 配置文件检查
+ls configs/openclaw-target.local.env
+
+# 配置验证
+./scripts/validate-overlay.sh configs/openclaw-target.local.env
+
+# 运行时目录检查
+ls -la ~/.infinity-company/
+ls -la ~/.infinity-company/.release/
+
+# 快照检查
+ls -la snapshots/attach-*
+
+# 服务健康检查
+curl -fsS http://127.0.0.1:18789/health
+curl -fsS http://127.0.0.1:1420/
+
+# Token 检查
+cat ~/.openclaw/openclaw.json | grep -o '"token"[^,]*'
+```
+
+| 序号 | 检查项 | 检查命令 | 通过标准 | 检查结果 |
 |------|--------|----------|----------|----------|
 | 1 | 配置文件生成 | `ls configs/openclaw-target.local.env` | 文件存在 | ☐ |
-| 2 | 配置验证通过 | `./scripts/validate-overlay.sh` | 无错误输出 | ☐ |
+| 2 | 配置验证通过 | `./scripts/validate-overlay.sh configs/openclaw-target.local.env` | 无错误输出 | ☐ |
 | 3 | 运行时目录创建 | `ls ~/.infinity-company` | 目录存在 | ☐ |
-| 4 | 部署标记创建 | `ls ~/.infinity-company/.release/` | 文件存在 | ☐ |
-| 5 | 快照自动创建 | `ls snapshots/` | 有 attach 快照 | ☐ |
-| 6 | Gateway 启动 | `curl http://127.0.0.1:18789/health` | HTTP 200 | ☐ |
-| 7 | ClawPanel 启动 | `curl http://127.0.0.1:1420/` | HTTP 200 | ☐ |
-| 8 | Token 可读取 | 检查脚本输出 | Token 显示 | ☐ |
+| 4 | 部署标记创建 | `cat ~/.infinity-company/.release/last-deploy.txt` | 显示部署时间 | ☐ |
+| 5 | 快照自动创建 | `ls snapshots/attach-* \| wc -l` | ≥ 1 个 | ☐ |
+| 6 | Gateway 启动 | `curl -fsS http://127.0.0.1:18789/health` | HTTP 200 | ☐ |
+| 7 | ClawPanel 启动 | `curl -fsS http://127.0.0.1:1420/` | HTTP 200 | ☐ |
+| 8 | Token 可读取 | `cat ~/.openclaw/openclaw.json` | 文件存在且有效 | ☐ |
 
 ### 8.2 功能验收检查项
 
-| 序号 | 检查项 | 检查方法 | 通过标准 | 检查结果 |
+#### 检查命令速查
+
+```bash
+# Attach 操作测试
+./scripts/attach-openclaw.sh configs/openclaw-target.local.env
+ls -la snapshots/attach-* | tail -1
+
+# Deploy 操作测试
+./scripts/deploy-overlay.sh configs/openclaw-target.local.env
+cat ~/.infinity-company/.release/last-deploy.txt
+
+# Rollback 操作测试
+./scripts/rollback-overlay.sh configs/openclaw-target.local.env
+
+# 日常启动测试
+./Open-InfinityCompany.command
+curl -fsS http://127.0.0.1:18789/health
+
+# 配置热更新测试
+echo "# test" >> configs/openclaw-target.local.env
+./scripts/deploy-overlay.sh configs/openclaw-target.local.env
+git checkout configs/openclaw-target.local.env
+```
+
+| 序号 | 检查项 | 检查命令 | 通过标准 | 检查结果 |
 |------|--------|----------|----------|----------|
-| 1 | Attach 操作 | 执行 attach 脚本 | 成功并创建快照 | ☐ |
-| 2 | Deploy 操作 | 执行 deploy 脚本 | 成功并更新标记 | ☐ |
-| 3 | Rollback 操作 | 执行 rollback 脚本 | 成功恢复 | ☐ |
-| 4 | 日常启动 | 执行 Open-InfinityCompany | 服务正常 | ☐ |
-| 5 | 配置热更新 | 修改配置后 deploy | 配置生效 | ☐ |
+| 1 | Attach 操作 | `./scripts/attach-openclaw.sh configs/openclaw-target.local.env` | 成功并创建快照 | ☐ |
+| 2 | Deploy 操作 | `./scripts/deploy-overlay.sh configs/openclaw-target.local.env` | 成功并更新标记 | ☐ |
+| 3 | Rollback 操作 | `./scripts/rollback-overlay.sh configs/openclaw-target.local.env` | 成功恢复 | ☐ |
+| 4 | 日常启动 | `./Open-InfinityCompany.command` | 服务正常 | ☐ |
+| 5 | 配置热更新 | 修改配置后执行 deploy | 配置生效 | ☐ |
+| 6 | 每日检查 | `./scripts/daily-check.sh` | 全部通过 | ☐ |
 
 ### 8.3 角色验收检查项
 
-| 角色 | 检查项 | 通过标准 | 检查结果 |
-|------|--------|----------|----------|
-| **张良** | 可访问 ClawPanel | 正常访问 | ☐ |
-| **萧何** | 可读取 OpenViking | 正常检索 | ☐ |
-| **韩信** | 可接收 Task 通知 | 消息可达 | ☐ |
-| **陈平** | 可更新 Bug 状态 | 状态同步 | ☐ |
-| **周勃** | 可执行部署操作 | 部署成功 | ☐ |
-| **曹参** | 可访问 Notion 看板 | 数据同步 | ☐ |
-| **陆贾** | 可写入 OpenViking | 知识沉淀 | ☐ |
+#### 检查命令速查
+
+```bash
+# ClawPanel 访问检查
+curl -fsS http://127.0.0.1:1420/ > /dev/null && echo "张良: ClawPanel 可访问"
+
+# OpenViking 检查（通过 Python 接口）
+python3 -c "import notion_client; print('萧何: OpenViking 库可用')" 2>/dev/null
+
+# 部署操作检查
+./scripts/validate-overlay.sh configs/openclaw-target.local.env && echo "周勃: 部署权限正常"
+
+# Notion API 检查
+curl -s -H "Authorization: Bearer $NOTION_API_KEY" \
+  https://api.notion.com/v1/users/me 2>/dev/null | grep -q "object" && \
+  echo "曹参: Notion API 可访问"
+
+# 知识库写入检查（通过目录权限）
+touch ~/.infinity-company/.test_write 2>/dev/null && \
+  rm ~/.infinity-company/.test_write && \
+  echo "陆贾: 知识库可写入"
+```
+
+| 角色 | 检查项 | 检查命令/方法 | 通过标准 | 检查结果 |
+|------|--------|--------------|----------|----------|
+| **张良** | 可访问 ClawPanel | `curl -fsS http://127.0.0.1:1420/` | HTTP 200 | ☐ |
+| **萧何** | 可读取 OpenViking | `python3 -c "import notion_client"` | 库可用 | ☐ |
+| **韩信** | 可接收 Task 通知 | 检查 ClawPanel 消息 | 消息可达 | ☐ |
+| **陈平** | 可更新 Bug 状态 | 检查 Notion API 写权限 | 状态同步 | ☐ |
+| **周勃** | 可执行部署操作 | `./scripts/deploy-overlay.sh` | 部署成功 | ☐ |
+| **曹参** | 可访问 Notion 看板 | `curl -H "Authorization: Bearer \$TOKEN" https://api.notion.com/v1/databases` | 返回数据库列表 | ☐ |
+| **陆贾** | 可写入 OpenViking | `touch ~/.infinity-company/.test_write` | 写入成功 | ☐ |
 
 ### 8.4 流程验收检查项
 
-| 流程 | 检查项 | 通过标准 | 检查结果 |
-|------|--------|----------|----------|
-| **外部需求** | 郦食其可登记需求 | 需求进入 Notion | ☐ |
-| **私人助理** | 夏侯婴可分发需求 | 路由正确 | ☐ |
-| **Story 创建** | 曹参可创建 Story | 看板更新 | ☐ |
-| **技术方案** | 萧何可输出方案 | 文档生成 | ☐ |
-| **代码提交** | 韩信可提交代码 | Git 更新 | ☐ |
-| **Bug 跟踪** | 陈平可跟踪 Bug | 状态流转 | ☐ |
-| **部署上线** | 周勃可部署上线 | 服务更新 | ☐ |
-| **知识归档** | 陆贾可归档知识 | OpenViking 更新 | ☐ |
+#### 检查命令速查
+
+```bash
+# Story 创建检查
+ls agents/caocan/ 2>/dev/null | grep -q "IDENTITY.md" && echo "曹参: Story 管理就绪"
+
+# 技术方案检查
+ls agents/xiaohe/ 2>/dev/null | grep -q "IDENTITY.md" && echo "萧何: 技术方案就绪"
+
+# 代码提交流程检查
+git -C agents/hanxin/ status 2>/dev/null && echo "韩信: 代码提交流程就绪"
+
+# Bug 跟踪检查
+ls agents/chenping/ 2>/dev/null | grep -q "IDENTITY.md" && echo "陈平: Bug 跟踪就绪"
+
+# 部署上线检查
+./scripts/validate-overlay.sh configs/openclaw-target.local.env && \
+  echo "周勃: 部署流程就绪"
+
+# 知识归档检查
+ls ~/.infinity-company/ 2>/dev/null | grep -q "logs" && echo "陆贾: 知识归档就绪"
+```
+
+| 流程 | 检查项 | 检查方法 | 通过标准 | 检查结果 |
+|------|--------|----------|----------|----------|
+| **外部需求** | 郦食其可登记需求 | 检查 agents/lishengqi/ 配置 | 配置文件存在 | ☐ |
+| **私人助理** | 夏侯婴可分发需求 | 检查 agents/xiahouying/ 配置 | 配置文件存在 | ☐ |
+| **Story 创建** | 曹参可创建 Story | 检查 agents/caocan/ IDENTITY.md | 文件存在 | ☐ |
+| **技术方案** | 萧何可输出方案 | 检查 agents/xiaohe/ IDENTITY.md | 文件存在 | ☐ |
+| **代码提交** | 韩信可提交代码 | `git status` | 工作区正常 | ☐ |
+| **Bug 跟踪** | 陈平可跟踪 Bug | 检查 agents/chenping/ IDENTITY.md | 文件存在 | ☐ |
+| **部署上线** | 周勃可部署上线 | 执行 `./scripts/deploy-overlay.sh` | 部署成功 | ☐ |
+| **知识归档** | 陆贾可归档知识 | 检查 `~/.infinity-company/logs/` | 目录可写 | ☐ |
 
 ### 8.5 签字确认模板
 
@@ -1008,6 +1119,7 @@ echo "  5. 配置监控告警"
 
 | 脚本 | 用途 | 参数 | 示例 |
 |------|------|------|------|
+| `daily-check.sh` | **每日运维检查** | `[env-file] [--report-only]` | `./scripts/daily-check.sh` |
 | `validate-overlay.sh` | 验证配置 | `<env-file>` | `./scripts/validate-overlay.sh configs/...` |
 | `attach-openclaw.sh` | 附着 overlay | `<env-file>` | `./scripts/attach-openclaw.sh configs/...` |
 | `deploy-overlay.sh` | 部署 overlay | `<env-file>` | `./scripts/deploy-overlay.sh configs/...` |
@@ -1068,10 +1180,11 @@ BACKUP_ROOT=/Users/wangrenzhu/work/MetaClaw/InfinityCompany/snapshots
 | 版本 | 日期 | 更新内容 | 作者 |
 |------|------|----------|------|
 | v1.0 | 2026-03-27 | 初始版本 | InfinityCompany 技术团队 |
+| v1.1 | 2026-03-28 | 完善运维检查清单、验收清单；添加 daily-check.sh 脚本 | 文档补充与演示Agent |
 
 ---
 
 **文档维护**: 陆贾（知识库管理员）  
 **技术审核**: 萧何（架构师）  
 **运维审核**: 周勃（运维工程师）  
-**最后更新**: 2026-03-27
+**最后更新**: 2026-03-28

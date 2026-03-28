@@ -2,10 +2,8 @@
 数据存储层
 """
 
-import os
-import yaml
 from typing import List, Optional, Dict
-from .models import Agent, AgentRole, OrganizationUnit
+from .models import Agent, AgentRole
 from .constants import AGENT_DEFINITIONS
 
 

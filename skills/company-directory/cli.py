@@ -121,8 +121,8 @@ def main():
     acpx_send_parser.add_argument('target_id', help='目标 Agent ID')
     acpx_send_parser.add_argument('message', help='消息内容')
     acpx_send_parser.add_argument('--from', '-f', dest='sender', default='system', help='发送方 Agent ID')
-    acpx_send_parser.add_argument('--timeout', type=int, default=120, help='消息发送超时秒数')
-    acpx_send_parser.add_argument('--probe-timeout', type=int, default=20, help='在线探测超时秒数')
+    acpx_send_parser.add_argument('--timeout', type=int, default=60, help='消息发送超时秒数')
+    acpx_send_parser.add_argument('--probe-timeout', type=int, default=45, help='在线探测超时秒数')
     acpx_send_parser.add_argument('--retries', type=int, default=0, help='失败重试次数')
     acpx_send_parser.add_argument('--fallback-email', action='store_true', help='多次失败后降级投递到邮箱')
     acpx_send_parser.add_argument('--fallback-email-urgency', choices=['urgent', 'normal', 'low'],
@@ -135,8 +135,8 @@ def main():
     acpx_broadcast_parser.add_argument('--targets', '-t', required=True, help='目标选择器: all | role:<role> | ids:id1,id2')
     acpx_broadcast_parser.add_argument('--message', '-m', required=True, help='广播消息内容')
     acpx_broadcast_parser.add_argument('--from', '-f', dest='sender', default='system', help='发送方 Agent ID')
-    acpx_broadcast_parser.add_argument('--timeout', type=int, default=120, help='每个目标发送超时秒数')
-    acpx_broadcast_parser.add_argument('--probe-timeout', type=int, default=20, help='在线探测超时秒数')
+    acpx_broadcast_parser.add_argument('--timeout', type=int, default=60, help='每个目标发送超时秒数')
+    acpx_broadcast_parser.add_argument('--probe-timeout', type=int, default=45, help='在线探测超时秒数')
     acpx_broadcast_parser.add_argument('--retries', type=int, default=0, help='单个目标失败重试次数')
     acpx_broadcast_parser.add_argument('--retry-failed', action='store_true', help='只重试失败目标')
     acpx_broadcast_parser.add_argument('--retry-rounds', type=int, default=1, help='失败目标重试轮次')
@@ -157,7 +157,7 @@ def main():
     # --- acpx-status 命令组 ---
     acpx_status_parser = subparsers.add_parser('acpx-status', help='查询目标在线状态')
     acpx_status_parser.add_argument('agent_id', help='目标 Agent ID')
-    acpx_status_parser.add_argument('--timeout', type=int, default=20, help='探测超时秒数')
+    acpx_status_parser.add_argument('--timeout', type=int, default=45, help='探测超时秒数')
     acpx_status_parser.add_argument('--json', '-j', action='store_true', help='JSON 输出')
     
     # --- chain 命令组 ---
@@ -312,6 +312,8 @@ def main():
         else:
             if result["status"] == "success":
                 print(f"\n✅ 已发送给 {result.get('target_name', args.target_id)} ({result.get('target_id', args.target_id)})")
+                if result.get("runtime_agent_id"):
+                    print(f"   运行时目标: {result.get('runtime_agent_id')}")
                 print(f"   消息ID: {result.get('message_id')}")
                 print(f"   对方状态: {result.get('target_status')}")
                 print(f"   送达状态: {result.get('delivery_status')}")
@@ -378,6 +380,8 @@ def main():
             print(json.dumps(result, ensure_ascii=False, indent=2))
         else:
             print(f"\n目标: {args.agent_id}")
+            if result.get("runtime_agent_id"):
+                print(f"运行时目标: {result.get('runtime_agent_id')}")
             print(f"状态: {result.get('status')}")
             print(f"说明: {result.get('message')}")
             if result.get("response_preview"):
